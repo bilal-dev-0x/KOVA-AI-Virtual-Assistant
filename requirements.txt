@@ -1,0 +1,6 @@
+speechrecognition
+requests
+gtts
+pygame
+openai
+python-dotenv
