@@ -1,3 +1,16 @@
+
+---
+
+## 2️⃣ Suggested Badges for README
+
+You can add these at the top of your README:
+
+![GitHub repo size](https://img.shields.io/github/repo-size/your-username/JarvisAI?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
+![Python Version](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square)
+![Last Commit](https://img.shields.io/github/last-commit/your-username/JarvisAI?style=flat-square)
+![Issues](https://img.shields.io/github/issues/your-username/JarvisAI?style=flat-square)
+
 # Jarvis AI Assistant (Config-based Release)
 
 This repository contains a GitHub-ready version of the **Jarvis AI Assistant**.
