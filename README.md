@@ -1,9 +1,9 @@
 
-![GitHub repo size](https://img.shields.io/github/repo-size/bilal-dev-0x/JarvisAI?style=flat-square)
+![GitHub repo size](https://img.shields.io/github/repo-size/bilal-dev-0x/Jarvis-AI-Virtual-Assistant?style=flat-square)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
 ![Python Version](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square)
-![Last Commit](https://img.shields.io/github/last-commit/bilal-dev-0x/JarvisAI?style=flat-square)
-![Issues](https://img.shields.io/github/issues/bilal-dev-0x/JarvisAI?style=flat-square)
+![Last Commit](https://img.shields.io/github/last-commit/bilal-dev-0x/Jarvis-AI-Virtual-Assistant?style=flat-square)
+![Issues](https://img.shields.io/github/issues/bilal-dev-0x/Jarvis-AI-Virtual-Assistant?style=flat-square)
 
 # Jarvis AI Assistant (Config-based Release)
 
