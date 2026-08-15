@@ -1,0 +1,19 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local configuration and secrets
+config.json
+.env
+
+# Generated audio
+jarvis_voice.mp3
+
+# Editor files
+.vscode/
+.idea/
