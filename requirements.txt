@@ -1,6 +1,7 @@
-speechrecognition
+SpeechRecognition
 requests
-gtts
-pygame
-openai
-python-dotenv
+google-genai
+gTTS
+pygame-ce
+sounddevice
+numpy
