@@ -1,147 +1,169 @@
+<p align="center">
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=0:0F172A,50:2563EB,100:7C3AED&height=170&section=header&text=Jarvis%20AI%20Assistant&fontSize=40&fontColor=ffffff&animation=fadeIn&fontAlignY=36&desc=Voice-controlled%20Python%20assistant%20with%20AI%20replies%20and%20automation%20commands&descSize=14&descAlignY=56" alt="Jarvis AI Assistant banner" />
+</p>
 
-![GitHub repo size](https://img.shields.io/github/repo-size/bilal-dev-0x/Jarvis-AI-Virtual-Assistant?style=flat-square)
-![License](https://img.shields.io/badge/License-MIT-green?style=flat-square)
-![Python Version](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square)
-![Last Commit](https://img.shields.io/github/last-commit/bilal-dev-0x/Jarvis-AI-Virtual-Assistant?style=flat-square)
-![Issues](https://img.shields.io/github/issues/bilal-dev-0x/Jarvis-AI-Virtual-Assistant?style=flat-square)
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python 3.10+" />
+  <img src="https://img.shields.io/badge/Type-Voice%20Assistant-7C3AED?style=for-the-badge" alt="Voice Assistant" />
+  <img src="https://img.shields.io/badge/OpenAI-API%20Powered-10A37F?style=for-the-badge&logo=openai&logoColor=white" alt="OpenAI API" />
+  <img src="https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge" alt="MIT License" />
+</p>
 
-# Jarvis AI Assistant (Config-based Release)
+---
 
-This repository contains a GitHub-ready version of the **Jarvis AI Assistant**.
-Sensitive credentials (API keys) have been removed for security.
+## Overview
+
+Jarvis AI Assistant is a Python voice assistant that listens for the wake word `Jarvis`, accepts spoken commands, opens common websites/apps, plays saved songs, reads date/time, fetches news headlines, and sends fallback questions to an AI model.
+
+This is a beginner-to-intermediate Python project focused on speech recognition, text-to-speech, API usage, config-based secrets, and command routing.
+
+---
+
+## Features
+
+| Feature | What It Does |
+|---|---|
+| Wake word listener | Starts command mode when it hears `Jarvis` |
+| Voice commands | Uses microphone input through `speech_recognition` |
+| Text-to-speech | Speaks responses with `gTTS` and `pygame` |
+| AI replies | Sends unknown commands to the OpenAI API |
+| Web shortcuts | Opens YouTube, Google, Spotify, and WhatsApp |
+| Music library | Plays saved music links from `music_library.py` |
+| Date and time | Reads the current date and time aloud |
+| News support | Fetches top headlines when a News API key is configured |
+
+---
+
+## Project Structure
+
+```text
+Jarvis-AI-Virtual-Assistant/
+|-- main.py
+|-- music_library.py
+|-- config.json.example
+|-- requirements.txt
+|-- LICENSE
+`-- README.md
+```
+
+---
 
 ## Setup
 
-1. Copy `config.json.example` to `config.json`.
-2. Paste your OpenAI API key (and optional News API key) in `config.json`.
-3. Install dependencies:
+### 1. Clone the repository
 
 ```bash
-pip install -r requirements.txt
+git clone https://github.com/bilal-dev-0x/Jarvis-AI-Virtual-Assistant.git
+cd Jarvis-AI-Virtual-Assistant
 ```
 
-4. Run Jarvis:
-
-```bash
-python main.py
-```
-
-## Notes
-
-- Users do not need `.env` or environment variables.
-- Update your music library in `music_library.py`.
-- API keys should **never** be committed to GitHub.
-
-## Instructions to use
-
-# Jarvis AI Assistant - User Instructions
-
-Welcome to Jarvis AI Assistant! This guide will help you set up and run Jarvis easily.
-
----
-
-## 1. Prerequisites
-
-- Python 3.10 or higher
-- Internet connection
-- Microphone for voice commands
-
----
-
-## 2. Installation Steps
-
-1. **Download the project** or clone it:
-
-```bash
-git clone https://github.com/bilal-dev-0x/JarvisAI.git
-cd JarvisAI
-```
-
-2. **Create a virtual environment** (recommended):
+### 2. Create and activate a virtual environment
 
 ```bash
 python -m venv .venv
 ```
 
-3. **Activate the virtual environment**:
+Windows PowerShell:
 
-- Windows (PowerShell):
 ```powershell
-& ".\.venv\Scripts\Activate.ps1"
+.\.venv\Scripts\Activate.ps1
 ```
 
-- Linux/macOS:
+macOS/Linux:
+
 ```bash
 source .venv/bin/activate
 ```
 
-4. **Install dependencies**:
+### 3. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
----
+### 4. Add API keys
 
-## 3. Configure API Keys
+Copy the example config:
 
-1. Copy `config.json.example` → rename to `config.json`.
-2. Paste your keys into `config.json`:
+```bash
+copy config.json.example config.json
+```
+
+Then edit `config.json`:
 
 ```json
 {
-    "OPENAI_API_KEY": "YOUR_OPENAI_KEY_HERE",
-    "NEWS_API_KEY": "YOUR_NEWS_API_KEY_HERE"
+  "OPENAI_API_KEY": "YOUR_OPENAI_KEY_HERE",
+  "NEWS_API_KEY": "YOUR_NEWS_API_KEY_HERE"
 }
 ```
 
-> ⚠️ Never share your API keys publicly.
+`NEWS_API_KEY` is optional, but AI replies require `OPENAI_API_KEY`.
 
 ---
 
-## 4. Running Jarvis
-
-1. Activate your virtual environment.
-2. Start Jarvis:
+## Run
 
 ```bash
 python main.py
 ```
 
-3. Speak the wake word: **“Jarvis”**.
-4. Supported commands:
+Say the wake word:
 
-### Web / Apps
-- `Open YouTube`
-- `Open Spotify`
-- `Open Facebook`
-- `Open Google`
-- `Open WhatsApp` (Windows only)
+```text
+Jarvis
+```
 
-### Music Library
-- `Play <song name>` (if it exists in `music_library.py`)
+Then try commands like:
 
-### General
-- `Hello`
-- `Today date`
-- `Current time`
-- `Global news`
-- `Pakistani news`
-
-> ⚠️ Commands **not included yet** (like `Open LinkedIn`) will not work unless added in `main.py`.
+```text
+open youtube
+open google
+open spotify
+play <song name>
+today date
+current time
+global news
+open whatsapp
+```
 
 ---
 
-## 5. Customization
+## Security Notes
 
-- Add more songs in `music_library.py`
-- Add new commands in `main.py`
-- Extend AI responses using OpenAI GPT API
+- Keep real API keys inside `config.json` only.
+- Do not commit `config.json` to GitHub.
+- `config.json.example` is safe because it contains placeholders only.
 
 ---
 
-## 6. Troubleshooting
+## Concepts Practiced
 
-- Check microphone settings if Jarvis cannot hear you
-- Verify API keys in `config.json`
-- Reinstall dependencies: `pip install -r requirements.txt`
+| Area | Concepts |
+|---|---|
+| Python basics | functions, loops, conditionals, imports |
+| Voice input | microphone listening and speech-to-text |
+| Audio output | generated speech playback |
+| APIs | OpenAI API and News API requests |
+| Config files | JSON-based secret management |
+| Automation | opening apps, websites, and saved links |
+
+---
+
+## Future Improvements
+
+- Add a cleaner command router.
+- Add better error handling for microphone and API failures.
+- Add more app shortcuts.
+- Add offline command mode.
+- Convert repeated commands into reusable functions.
+
+---
+
+<p align="center">
+  <b>A practical Python assistant project built while learning real automation and AI API workflows.</b>
+</p>
+
+<p align="center">
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=0:7C3AED,50:2563EB,100:0F172A&height=100&section=footer" alt="Footer wave" />
+</p>
