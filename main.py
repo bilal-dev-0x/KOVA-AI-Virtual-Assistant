@@ -107,8 +107,7 @@ def open_whatsapp():
     ], shell=True)
     speak("Opening WhatsApp")
 
-
-if __name__ == "__main__":
+def main():
     speak("Initializing KOVA....")
 
     while True:
@@ -227,3 +226,7 @@ if __name__ == "__main__":
 
         except Exception as e:
             print("Error:", e)
+
+
+if __name__ == "__main__":
+    main()
