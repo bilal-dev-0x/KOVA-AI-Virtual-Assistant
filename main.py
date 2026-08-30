@@ -31,7 +31,7 @@ news_api = config.get("NEWS_API_KEY", "")
 
 
 if not gemini_api_key:
-    print("Please set your Gemini API key in config.json before running Jarvis.")
+    print("Please set your Gemini API key in config.json before running KOVA.")
     exit()
 
 
@@ -59,7 +59,7 @@ def listen_with_sounddevice(seconds=4, sample_rate=16000):
 
 def speak(text):
     try:
-        filename = "jarvis_voice.mp3"
+        filename = "kova_voice.mp3"
         tts = gTTS(text=text, lang="en")
         tts.save(filename)
 
@@ -85,7 +85,7 @@ def aiprocess(command):
     chat = client.chats.create(model=gemini_model)
 
     prompt = f"""
-You are Jarvis, a helpful AI virtual assistant.
+You are KOVA, a helpful AI virtual assistant.
 Give short responses.
 Address the user naturally as '{USER_TITLE}'.
 
@@ -109,7 +109,7 @@ def open_whatsapp():
 
 
 if __name__ == "__main__":
-    speak("Initializing Jarvis....")
+    speak("Initializing KOVA....")
 
     while True:
         try:
@@ -125,7 +125,7 @@ if __name__ == "__main__":
             command = recognizer.recognize_google(audio)
             print("You said:", command)
 
-            if "jarvis" in command.lower():
+            if "kova" in command.lower():
                 speak(f"Yes {USER_TITLE}?")
 
                 print("Listening for command... 🎤")
