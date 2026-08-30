@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://capsule-render.vercel.app/api?type=waving&color=0:020617,45:0EA5E9,100:8B5CF6&height=175&section=header&text=Jarvis%20AI%20Virtual%20Assistant&fontSize=38&fontColor=ffffff&animation=fadeIn&fontAlignY=36&desc=Voice%20commands%20%7C%20Gemini%20AI%20replies%20%7C%20News%20and%20app%20automation&descSize=14&descAlignY=56" alt="Jarvis AI Virtual Assistant banner" />
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=0:020617,45:0EA5E9,100:8B5CF6&height=175&section=header&text=KOVA%20AI%20Virtual%20Assistant&fontSize=38&fontColor=ffffff&animation=fadeIn&fontAlignY=36&desc=Voice%20commands%20%7C%20Gemini%20AI%20replies%20%7C%20News%20and%20app%20automation&descSize=14&descAlignY=56" alt="KOVA AI Virtual Assistant banner" />
 </p>
 
 <p align="center">
@@ -13,7 +13,7 @@
 
 ## Overview
 
-Jarvis AI Virtual Assistant is a Python-based voice assistant that listens for the wake word `Jarvis`, records microphone input with `sounddevice`, converts speech to text, responds out loud, opens common websites/apps, plays saved music links, reads date/time, fetches news headlines, and sends unknown commands to Google Gemini for short AI replies.
+KOVA AI Virtual Assistant is a Python-based voice assistant that listens for the wake word `KOVA`, records microphone input with `sounddevice`, converts speech to text, responds out loud, opens common websites/apps, plays saved music links, reads date/time, fetches news headlines, and sends unknown commands to Google Gemini for short AI replies.
 
 The latest version is configured around Gemini, supports a configurable Gemini model through `config.json`, and addresses the user naturally as `Commander`.
 
@@ -23,7 +23,7 @@ The latest version is configured around Gemini, supports a configurable Gemini m
 
 | Feature | Current Behavior |
 |---|---|
-| Wake word mode | Starts command mode when it hears `Jarvis` |
+| Wake word mode | Starts command mode when it hears `KOVA` |
 | Microphone input | Records short audio clips with `sounddevice` |
 | Speech recognition | Uses `speech_recognition` with Google recognition |
 | Spoken replies | Converts responses to speech with `gTTS` and plays them with `pygame` |
@@ -40,7 +40,7 @@ The latest version is configured around Gemini, supports a configurable Gemini m
 ## Project Structure
 
 ```text
-Jarvis-AI-Virtual-Assistant/
+KOVA-AI-Virtual-Assistant/
 |-- main.py
 |-- music_library.py
 |-- config.json.example
@@ -137,7 +137,7 @@ python main.py
 First say the wake word:
 
 ```text
-Jarvis
+KOVA
 ```
 
 Then try commands like:
@@ -161,10 +161,10 @@ Then try commands like:
 
 1. `listen_with_sounddevice()` records a short microphone clip.
 2. `speech_recognition` converts the audio into text.
-3. Jarvis waits for the wake word before accepting a full command.
+3. KOVA waits for the wake word before accepting a full command.
 4. Built-in commands handle websites, music, date/time, news, and WhatsApp.
 5. Unknown commands are passed to Gemini using the configured model.
-6. `speak()` creates a temporary `jarvis_voice.mp3`, plays it, then removes it.
+6. `speak()` creates a temporary `kova_voice.mp3`, plays it, then removes it.
 
 ---
 
@@ -172,7 +172,7 @@ Then try commands like:
 
 | File/Value | What To Change |
 |---|---|
-| `USER_TITLE = "Commander"` | Change how Jarvis addresses the user |
+| `USER_TITLE = "Commander"` | Change how KOVA addresses the user |
 | `music_library.py` | Add your own songs and links |
 | `GEMINI_MODEL` | Switch Gemini model from config |
 | `chrome_path` in `main.py` | Adjust Chrome path for your machine |
