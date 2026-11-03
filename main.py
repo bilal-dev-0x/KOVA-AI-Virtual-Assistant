@@ -1,231 +1,175 @@
-import speech_recognition as sr
-import webbrowser
-import os
-import subprocess
-import time
-import music_library
-import requests
-from google import genai
-from datetime import datetime
-from gtts import gTTS
-import pygame
+import argparse
 import json
-import sounddevice as sd
+import os
+import re
+import time
+
+from desktop_agent import Agent
+from modules.logger import get_logger
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
+
+# The assistant's name and wake words come from ASSISTANT_NAME / WAKE_WORDS in config.json
+YES_WORDS = ("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "do it", "confirm", "go ahead", "of course")
+
+log = get_logger()
 
 
-USER_TITLE = "Commander"
-
-
-# Load API keys from config.json
-try:
-    with open("config.json", "r") as f:
-        config = json.load(f)
-except FileNotFoundError:
-    print("config.json not found. Copy config.json.example to config.json and add your API keys.")
-    exit()
-
-
-gemini_api_key = config.get("GEMINI_API_KEY")
-gemini_model = config.get("GEMINI_MODEL", "gemini-3.6-flash")
-news_api = config.get("NEWS_API_KEY", "")
-
-
-if not gemini_api_key:
-    print("Please set your Gemini API key in config.json before running KOVA.")
-    exit()
-
-
-client = genai.Client(api_key=gemini_api_key)
-recognizer = sr.Recognizer()
-
-
-def listen_with_sounddevice(seconds=4, sample_rate=16000):
+def load_config():
     try:
-        recording = sd.rec(
-            int(seconds * sample_rate),
-            samplerate=sample_rate,
-            channels=1,
-            dtype="int16"
-        )
-        sd.wait()
-
-        audio_data = sr.AudioData(recording.tobytes(), sample_rate, 2)
-        return audio_data
-
-    except Exception as e:
-        print("Microphone recording error:", e)
-        return None
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print("config.json not found, running with local commands only.")
+        print("Copy config.json.example to config.json to add your API keys.")
+    except json.JSONDecodeError as e:
+        print("config.json is not valid JSON:", e)
+    return {}
 
 
-def speak(text):
-    try:
-        filename = "kova_voice.mp3"
-        tts = gTTS(text=text, lang="en")
-        tts.save(filename)
-
-        pygame.mixer.init()
-        pygame.mixer.music.load(filename)
-        pygame.mixer.music.play()
-
-        while pygame.mixer.music.get_busy():
-            time.sleep(0.1)
-
-        pygame.mixer.music.unload()
-
-        if os.path.exists(filename):
-            os.remove(filename)
-
-    except Exception as e:
-        print("Error with gTTS:", e)
+def is_yes(answer):
+    answer = re.sub(r"[^\w\s]", " ", (answer or "").lower()).split()
+    text = " ".join(answer)
+    return any(text == word or text.startswith(word + " ") for word in YES_WORDS)
 
 
-def aiprocess(command):
-    print("Thinking for best.....")
+def respond(result, voice, name="KOVA"):
+    print(f"{name}: {result.message}")
+    if result.detail:
+        print(result.detail)
 
-    chat = client.chats.create(model=gemini_model)
-
-    prompt = f"""
-You are KOVA, a helpful AI virtual assistant.
-Give short responses.
-Address the user naturally as '{USER_TITLE}'.
-
-User command: {command}
-"""
-
-    response = chat.send_message(prompt)
-
-    if response.text:
-        return response.text.strip()
-
-    return f"{USER_TITLE}, I could not generate a response right now."
+    if voice:
+        from modules.voice_handler import speak
+        for line in result.message.split("\n"):
+            if line.strip():
+                speak(line)
 
 
-def open_whatsapp():
-    subprocess.run([
-        "powershell",
-        "(Get-StartApps -Name 'WhatsApp').AppID | ForEach-Object { Start-Process \"shell:AppsFolder\\$_\" }"
-    ], shell=True)
-    speak("Opening WhatsApp")
+def run_text(agent):
+    print(f"{agent.name} text mode. Type 'help' for commands, 'exit' to quit.")
 
-def main():
-    speak("Initializing KOVA....")
+    agent.confirm = lambda question: is_yes(input(f"{agent.name}: {question} (yes/no) "))
+    agent.ask = lambda question: input(f"{agent.name}: {question} ")
 
     while True:
         try:
-            chrome_path = "C:/Program Files/Google/Chrome/Application/chrome.exe %s"
-            webpath = webbrowser.get(chrome_path)
+            line = input("You: ")
+        except EOFError:
+            break
 
-            print("Listening for wake word... 🎤")
-            audio = listen_with_sounddevice(seconds=3)
+        if not line.strip():
+            continue
 
-            if audio is None:
+        result = agent.handle(line)
+        respond(result, voice=False, name=agent.name)
+        if result.stop:
+            break
+
+
+def run_voice(agent):
+    from modules import voice_handler
+    from modules.voice_handler import speak
+
+    voice_handler.configure(agent.config)
+
+    def listen(wait_seconds=5, max_seconds=10):
+        heard = voice_handler.listen_text(wait_seconds=wait_seconds, max_seconds=max_seconds)
+        if heard:
+            print("You said:", heard)
+            log.info("Heard: %s", heard)
+        return heard
+
+    def ask(question):
+        speak(question)
+        return listen(wait_seconds=6)
+
+    def confirm(question):
+        answer = ask(question)
+        if answer is None:
+            answer = ask("Sorry, I didn't hear you. Yes or no?")
+        log.info("Confirmation %r -> %r", question, answer)
+        return is_yes(answer)
+
+    agent.confirm = confirm
+    agent.ask = ask
+    # Short misheard fragments ("close the", "get updated") are not worth a Gemini call
+    agent.min_ai_words = 3
+
+    # Once woken, Max keeps listening without the wake word until it hears
+    # "go to sleep" or nothing for AWAKE_TIMEOUT seconds (0 = never sleep on its own)
+    timeout = agent.config.get("AWAKE_TIMEOUT", 60)
+    awake = False
+    last_active = 0.0
+
+    speak(f"Initializing {agent.name}....")
+    print(f"Say '{agent.name}' to wake me up.")
+
+    while True:
+        if awake and timeout and time.time() - last_active > timeout:
+            awake = False
+            print(f"💤 No commands for {timeout} seconds, going to sleep.")
+            speak("Going to sleep.")
+            log.info("Fell asleep after %ss idle", timeout)
+
+        if not awake:
+            print("💤 Listening for wake word...")
+            heard = listen(wait_seconds=3, max_seconds=6)
+            if not heard:
                 continue
 
-            command = recognizer.recognize_google(audio)
-            print("You said:", command)
+            command = agent.find_wake_word(heard)
+            if command is None:
+                continue
 
-            if "kova" in command.lower():
-                speak(f"Yes {USER_TITLE}?")
+            awake = True
+            last_active = time.time()
+            log.info("Woke up")
 
-                print("Listening for command... 🎤")
-                audio = listen_with_sounddevice(seconds=5)
+            if not agent.normalize(command):
+                speak(f"Yes {agent.title}? I'm listening.")
+                last_active = time.time()
+                continue
+        else:
+            print("🎤 Listening (awake)...")
+            command = listen(wait_seconds=5)
+            if not command:
+                continue
 
-                if audio is None:
-                    continue
+        result = agent.handle(command)
+        respond(result, voice=True, name=agent.name)
+        # Count from when Max finished speaking, so long answers don't use up the timeout
+        last_active = time.time()
 
-                text = recognizer.recognize_google(audio)
-                print("Your command:", text)
+        if result.stop:
+            break
+        if result.sleep:
+            awake = False
 
-                if "hello" in text.lower():
-                    speak(f"Hi {USER_TITLE}, how are you?")
 
-                elif "open youtube" in text.lower():
-                    webpath.open("https://www.youtube.com/")
+def main():
+    parser = argparse.ArgumentParser(description="KOVA desktop assistant")
+    parser.add_argument("--text", action="store_true", help="type commands instead of speaking")
+    parser.add_argument("--mic-test", action="store_true", help="show live mic levels and a suggested threshold")
+    args = parser.parse_args()
 
-                elif "open google" in text.lower():
-                    webpath.open("https://www.google.com/")
+    if args.mic_test:
+        from modules.voice_handler import mic_test
+        mic_test()
+        return
 
-                elif "open spotify" in text.lower():
-                    webpath.open("https://open.spotify.com/")
+    agent = Agent(load_config())
+    log.info("KOVA started in %s mode", "text" if args.text else "voice")
 
-                elif text.lower().startswith("play"):
-                    song = text.lower().replace("play", "").strip()
+    try:
+        if args.text:
+            run_text(agent)
+        else:
+            run_voice(agent)
+    except KeyboardInterrupt:
+        print("\nKOVA shutting down.")
 
-                    if song in music_library.library:
-                        speak(f"Playing {song}")
-                        webpath.open(music_library.library[song])
-                    else:
-                        speak(f"Sorry {USER_TITLE}, this song is not in your library.")
-
-                elif "global news" in text.lower():
-                    if not news_api:
-                        speak("News API key is not configured.")
-                    else:
-                        r = requests.get(
-                            f"https://newsapi.org/v2/top-headlines?country=pk&apiKey={news_api}"
-                        )
-                        data = r.json()
-
-                        if data.get("status") == "ok":
-                            articles = data.get("articles", [])
-                            speak("Here are the top headlines.")
-
-                            for i, article in enumerate(articles[:5], start=1):
-                                headline = article.get("title")
-
-                                if headline:
-                                    print(f"Headline {i}: {headline}")
-                                    speak(f"Headline {i}: {headline}")
-                        else:
-                            speak(f"Sorry {USER_TITLE}, I could not fetch the news at this moment.")
-
-                elif "pakistani news" in text.lower():
-                    speak("Pakistani news is not configured in this release.")
-
-                elif "open whatsapp" in text.lower():
-                    open_whatsapp()
-                    time.sleep(5)
-                    break
-
-                elif "today date" in text.lower():
-                    today = datetime.now()
-                    formatted_date = today.strftime("%A, %d %B %Y")
-                    print(formatted_date)
-                    speak(f"Today is {formatted_date}")
-
-                elif "current time" in text.lower():
-                    now = datetime.now()
-                    hour = now.strftime("%I").lstrip("0")
-                    minute = now.strftime("%M")
-                    am_pm = now.strftime("%p")
-
-                    if minute == "00":
-                        speak(f"It is {hour} o'clock {am_pm}")
-                    else:
-                        speak(f"The time is {hour} {minute} {am_pm}")
-
-                    print(now.strftime("%I:%M %p"))
-
-                else:
-                    output = aiprocess(text)
-                    lines = output.split("\n")
-
-                    for line in lines:
-                        if line.strip():
-                            print(line)
-                            speak(line)
-
-        except sr.WaitTimeoutError:
-            print("⏳ No speech detected. Try again...")
-
-        except sr.UnknownValueError:
-            print("❌ Could not understand your speech.")
-
-        except sr.RequestError:
-            print("⚠️ Could not connect to recognition service.")
-
-        except Exception as e:
-            print("Error:", e)
+    log.info("KOVA stopped")
 
 
 if __name__ == "__main__":

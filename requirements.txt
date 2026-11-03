@@ -5,3 +5,5 @@ gTTS
 pygame-ce
 sounddevice
 numpy
+psutil
+pyttsx3
