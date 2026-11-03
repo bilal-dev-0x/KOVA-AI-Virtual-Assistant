@@ -1,0 +1,83 @@
+{
+  "apps": {
+    "chrome": {
+      "aliases": ["google chrome"],
+      "launch": {"appid": "Chrome"},
+      "process": ["chrome.exe"]
+    },
+    "brave": {
+      "aliases": ["brave browser"],
+      "launch": {"appid": "Brave"},
+      "process": ["brave.exe"]
+    },
+    "edge": {
+      "aliases": ["microsoft edge"],
+      "launch": {"appid": "MSEdge"},
+      "process": ["msedge.exe"]
+    },
+    "vs code": {
+      "aliases": ["vscode", "visual studio code", "code editor"],
+      "launch": {"appid": "Microsoft.VisualStudioCode"},
+      "process": ["Code.exe"]
+    },
+    "github desktop": {
+      "aliases": ["github app", "git hub desktop", "git hub app", "github desktop app"],
+      "launch": {"appid": "com.squirrel.GitHubDesktop.GitHubDesktop"},
+      "process": ["GitHubDesktop.exe"]
+    },
+    "discord": {
+      "aliases": [],
+      "launch": {"appid": "com.squirrel.Discord.Discord"},
+      "process": ["Discord.exe"]
+    },
+    "steam": {
+      "aliases": [],
+      "launch": {"uri": "steam://open/main"},
+      "process": ["steam.exe"]
+    },
+    "vlc": {
+      "aliases": ["vlc player", "media player"],
+      "launch": {"exe": "C:/Program Files/VideoLAN/VLC/vlc.exe"},
+      "process": ["vlc.exe"]
+    },
+    "notepad": {
+      "aliases": ["note pad"],
+      "launch": {"exe": "notepad.exe"},
+      "process": ["notepad.exe"]
+    },
+    "paint": {
+      "aliases": ["ms paint"],
+      "launch": {"exe": "mspaint.exe"},
+      "process": ["mspaint.exe"]
+    },
+    "calculator": {
+      "aliases": ["calc"],
+      "launch": {"appid": "Microsoft.WindowsCalculator_8wekyb3d8bbwe!App"},
+      "process": ["Calculator.exe", "CalculatorApp.exe"]
+    },
+    "file explorer": {
+      "aliases": ["explorer", "my files", "this pc"],
+      "launch": {"exe": "explorer.exe"},
+      "process": []
+    },
+    "task manager": {
+      "aliases": ["taskmgr"],
+      "launch": {"exe": "taskmgr.exe"},
+      "process": ["Taskmgr.exe"]
+    },
+    "settings": {
+      "aliases": ["windows settings"],
+      "launch": {"uri": "ms-settings:"},
+      "process": ["SystemSettings.exe"]
+    }
+  },
+  "websites": {
+    "youtube": "https://www.youtube.com/",
+    "google": "https://www.google.com/",
+    "spotify": "https://open.spotify.com/",
+    "whatsapp": "https://web.whatsapp.com/",
+    "gmail": "https://mail.google.com/",
+    "github": "https://github.com/",
+    "gemini": "https://gemini.google.com/"
+  }
+}

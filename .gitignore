@@ -12,7 +12,10 @@ config.json
 .env
 
 # Generated audio
-jarvis_voice.mp3
+kova_voice.mp3
+
+# Logs
+logs/
 
 # Editor files
 .vscode/
