@@ -9,10 +9,8 @@ env/
 
 # Local configuration and secrets
 config.json
+permissions.json
 .env
-
-# Generated audio
-kova_voice.mp3
 
 # Logs
 logs/
@@ -20,3 +18,5 @@ logs/
 # Editor files
 .vscode/
 .idea/
+.kilo/
+.pytest_cache/

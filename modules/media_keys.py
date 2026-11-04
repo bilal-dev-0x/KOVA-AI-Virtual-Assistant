@@ -11,6 +11,7 @@ KEYS = {
     "next": 0xB0,
     "previous": 0xB1,
     "play_pause": 0xB3,
+    "windows": 0x5B,
 }
 KEYEVENTF_EXTENDEDKEY = 0x1
 KEYEVENTF_KEYUP = 0x2
@@ -19,9 +20,10 @@ VOLUME_STEPS = 5  # each press is 2%, so one command changes the volume by 10%
 
 def press(key, times=1):
     vk = KEYS[key]
+    flags = KEYEVENTF_EXTENDEDKEY
     for _ in range(times):
-        ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY, 0)
-        ctypes.windll.user32.keybd_event(vk, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0)
+        ctypes.windll.user32.keybd_event(vk, 0, flags, 0)
+        ctypes.windll.user32.keybd_event(vk, 0, flags | KEYEVENTF_KEYUP, 0)
 
 
 def volume_up():

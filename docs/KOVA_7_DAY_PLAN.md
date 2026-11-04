@@ -1,143 +1,218 @@
-# KOVA 2.0 — 7-Day Build Plan
+# KOVA 2.0 — 7-Day Build Plan (ambitious version)
 
 **Window:** Day 1 = Tue 3 Nov 2026 → Day 7 = Mon 9 Nov 2026
-**Goal:** turn KOVA from a voice command script into a real desktop AI agent. It should understand natural language, use tools safely, remember you, manage your PC, help with coding and gaming, and have its own dashboard.
+**Goal:** turn KOVA, whose assistant is called **Max**, into a real desktop AI agent. Max should:
+- plan and use tools;
+- remember you and watch out for problems;
+- see and operate your screen;
+- help you code and game;
+- talk to you in natural real-time voice, with a dashboard.
 
-## Ground rules for the 7 days
-1. **KOVA works at the end of every day.** Every day ends with a working, tested, committed version. If a day runs late, we cut features, not stability.
-2. **Claude builds, you test.** Claude writes the code and the automated tests and explains the logic of each module briefly. You test the voice and real-PC parts (the mic, speakers, apps and games are on your machine), then we commit.
-3. **The roadmap rules still apply:** Gemini only when needed, no background polling, approval before risky actions, and no secrets in git.
-4. **Honest scope:** all 10 roadmap phases get a *working first version*, except Phase 9 and parts of Phases 8 and 10, which go in the "after day 7" list. Polishing everything is not possible in 7 days.
+## Ground rules
+1. **Max works at the end of every day.** Each day ends tested, committed and pushed. If a day runs late, we drop *Stretch* items first, then *Advanced* ones. *Core* items always ship.
+2. **Claude builds, you test.** Claude writes the code and the automated tests and explains each module briefly. You test what needs your PC (mic, apps, games, screen): about 30–60 min a day.
+3. **Roadmap rules still apply:**
+   - local first, AI on demand;
+   - no constant polling or recording;
+   - approval before consequential actions;
+   - no shell commands written by the AI;
+   - no secrets in git.
+4. **Brain is swappable.** All AI calls go through one provider interface. We build on **Gemini** now; a **local LLM via Ollama** can be added later as a second provider (see Backlog) without rewriting the agent.
 
----
-
-## The big idea that makes 7 days possible
-On **Day 2**, every KOVA ability becomes a **tool** in one tool registry: open an app, check the CPU, search files, start gaming mode, and so on. Each tool has a name, a description, its arguments and a safety level.
-
-- Simple, exact commands ("open chrome") match locally, so they're instant, free and work offline.
-- Anything else goes to Gemini with the list of tools. Gemini picks the tools and fills in the arguments, e.g. *"close everything except VS Code and tell me how much RAM I saved"*.
-- Every tool call passes through the **permission manager** (safe / controlled / critical) before it runs.
-
-From Day 3 on, every new feature is just another set of tools, so each day adds abilities instead of rewiring KOVA.
+Each day lists **Core** (must ship), **Advanced** (target) and **Stretch** (only if time allows).
 
 ---
 
 ## Day 1 (Tue 3 Nov): Foundation — roadmap Phase 1 ✅ DONE
-**Added after voice testing:**
-- The assistant's name is now **Max** (`ASSISTANT_NAME`, `WAKE_WORDS`), because "KOVA" was misheard.
-- Stay-awake mode with a sleep timeout (`AWAKE_TIMEOUT`).
-- Recording stops when you stop talking, and speech detection uses only the 1–4 kHz band, to ignore fan hum.
-- `--mic-test` mode.
-- Every installed Start-menu app can be opened.
-- Media keys: volume, pause, next.
-- Gemini is told it cannot perform actions.
+*Checklist: [PHASE1_PLAN.md](PHASE1_PLAN.md).*
+- Command router with safety levels; text mode and voice mode.
+- Open, close, restart and list apps (`apps.json` plus every Start-menu app); websites.
+- On-demand CPU, RAM, disk and battery; media keys; music with fuzzy matching.
+- Gemini fallback, which no longer claims to do actions; logging; 130 tests.
+- Added after voice testing:
+  - the assistant is called **Max**, with configurable wake words;
+  - stay-awake mode;
+  - recording stops when you stop talking;
+  - speech detection in the 1–4 kHz band, which ignores fan hum;
+  - `--mic-test`.
 
-**Remaining from Phase 1, moved to Day 7:** measuring idle RAM/CPU and updating the README.
+Moved to Day 7: idle RAM/CPU measurements and the README.
 
-*Detailed checklist: [PHASE1_PLAN.md](PHASE1_PLAN.md), Milestones 0–4.*
-- Tidy up and commit the voice-handler work.
-- Command router, with text mode (`python main.py --text`) and voice mode.
-- App control: open, close, restart and list apps, configured in `apps.json`.
-- On-demand CPU, RAM and disk checks with `psutil`.
-- Fuzzy matching, which fixes the broken `play` command.
-- Offline voice fallback (`pyttsx3`), logging, and `pytest` tests.
+## Day 2 (Wed 4 Nov): The Agent Brain 🧠 — roadmap Phase 3 + Safety model ✅ BUILT (waiting for your voice test)
+*Built:*
+- every Core item;
+- Advanced: context, reminders, undo, plugins, live trace, process tools;
+- Stretch: budget guard.
 
-**Demo at end of day:** type or say "open notepad", "system status", "play pasoori" and "close notepad" (it asks first), all without a Gemini key.
+*Changed:*
+- Google Search grounding has a quota of 0 on the free tier, so `web_search` falls back to opening a browser search, and news falls back to NewsAPI.
+- Each free model allows only ~20 requests a day, so Max now switches through a **model fallback chain** (`GEMINI_MODELS`).
+- Cancel = say no at the approval, or Ctrl+C.
+- Learned phrases and spoken progress move to Day 3.
 
-## Day 2 (Wed 4 Nov): AI Brain 2.0 + safety — roadmap Phase 3 and the Safety model
-- `tool_registry.py`: Day 1's commands become registered tools.
-- `ai_brain.py`: Gemini function calling over the registry, with timeouts, retries and clear failure messages.
-- Multi-step plans: KOVA shows its plan ("1. close Chrome 2. open VS Code…") before running anything that isn't safe.
-- `permission_manager.py` + `permissions.json`: the safe/controlled/critical levels, with the option to always allow a specific action.
-- Short conversation context, so follow-ups like "and close it too" work.
-- Rule: KOVA never runs shell commands written by the AI. Only registered tools with checked arguments.
+**Core**
+- `tool_registry.py`: every ability becomes a tool with a name, a description, typed arguments, a safety level and whether it can be undone. An `@tool` decorator registers it.
+- `brain/` with a **provider interface**; `GeminiProvider` with function calling.
+- **Agent loop:**
+  1. plan;
+  2. call tools and read the results;
+  3. continue or answer.
+  
+  It stops after 6 steps. Every number in an answer comes from a tool.
+- **Hybrid routing:** exact commands stay local (instant, free, offline); natural or complex requests go to the agent.
+- `permission_manager.py` + `permissions.json`:
+  - safe actions run;
+  - controlled actions get **one approval for the whole plan**;
+  - critical actions ask again right before each step;
+  - optional "always allow" for specific actions.
+- `logs/actions.jsonl`: every tool call with its arguments, approval and result.
+- Safety: there is no shell tool; arguments are validated against the schema; targets are checked before acting.
 
-**Demo:** "I'm done for today, close my browsers and tell me my battery and RAM".
+**Advanced**
+- **Google Search grounding** for live answers (weather, news, prices). It replaces NewsAPI.
+- **Conversation context:** "open discord" → "actually close it".
+- **Reminders and timers:** "remind me in 20 minutes…". They use a sleeping background timer, with no polling.
+- **Cancel and undo:** "cancel" stops a plan; "undo" reverses the last action that can be undone.
+- **Plugins:** a `.py` file in `plugins/` with `@tool` functions is loaded automatically at startup.
+- **Live agent trace** in the terminal (→ tool → result → next step).
+- **Process tools**, pulled forward from Day 3: top processes by CPU/RAM, "why is my laptop slow?".
 
-## Day 3 (Thu 5 Nov): Memory + System Intelligence — roadmap Phases 4 and 2
-- `memory_engine.py` (SQLite):
-  - preferences ("call me Commander", "my favourite song is…");
-  - facts ("remember my project folder is D:\Coding Arc");
-  - an activity history;
-  - review, correct and delete commands ("what do you remember about me?", "forget that").
-- Relevant memories are added to Gemini requests. Secrets are never stored.
-- System tools:
-  - list the top processes by CPU or RAM; end a process (critical: asks right before);
-  - a startup-apps list (view only);
+**Stretch**
+- **Learned phrases:** when Gemini maps a new phrase to a tool, Max caches it, so next time it's instant and offline.
+- **Gemini budget guard:** a daily request limit, with a warning near the free-tier quota.
+- **Spoken progress** during long plans.
+
+**Demo:** *"My laptop feels slow, close whatever is wasting RAM except VS Code, then tell me how much I saved."*
+
+## Day 3 (Thu 5 Nov): Memory + a Max that keeps watch 🧩 — roadmap Phases 4 and 2
+**Core**
+- `memory_engine.py` (SQLite): facts, preferences, an activity history.
+- Memory review, correction and deletion: "what do you remember about me?", "forget that".
+- **Meaning-based recall** with Gemini embeddings: "what's my project folder?" finds a fact saved in different words.
+- Relevant memories are added to agent requests. Secrets and passwords are never stored.
+- System intelligence:
+  - startup apps (view);
   - power-plan switching, which can be restored;
-  - a "health report" (CPU, RAM, disk, battery, uptime, heaviest apps).
+  - a health report (CPU, RAM, disk, battery, uptime, heaviest apps).
 
-**Demo:** "remember I like lo-fi when coding", then restart KOVA → "what do you know about me?" → "why is my laptop slow?"
+**Advanced**
+- **Auto-memory:** Max notices facts worth keeping and *asks* before saving them.
+- **Activity recall:** "what did I do yesterday?", "which apps did I use most this week?"
+- **Proactive alerts**, opt-in and checked every 30–60 s: battery low, RAM above 90% (naming the culprit), disk almost full.
+- **Routines** (`routines.json`): "coding mode", "morning routine". Each is a multi-step plan that stops safely on failure.
 
-## Day 4 (Fri 6 Nov): Files & Developer Intelligence — roadmap Phase 6
-- File tools:
-  - search by name, type or date;
-  - open a file or folder;
-  - create and rename files;
-  - move and organise files, e.g. "organise my Downloads by type". This is controlled, with a preview and an undo log.
-- Delete moves files to the Recycle Bin only, never deletes permanently, and is critical.
-- Projects: recognise a project folder, open it in VS Code, summarise it.
-- Git: status, recent commits, a draft commit message; commit and push only after you confirm.
-- Run a project's tests and explain failures; explain a Python file or an error message with Gemini.
+**Stretch**
+- Max **suggests** a routine after seeing you repeat the same steps.
 
-**Demo:** "open my KOVA project in VS Code, what changed since yesterday, and run the tests".
+**Demo:** "remember I like lo-fi when coding" → restart Max → "what do you know about me?" → "coding mode".
 
-## Day 5 (Sat 7 Nov): Desktop Automation + Gaming — roadmap Phases 5 and 7
-- Windows: list, focus, minimise, maximise and snap them (`pygetwindow`).
-- Workflows in `workflows.json`: one phrase runs several steps, e.g. "coding mode" opens VS Code, Spotify lo-fi and the project folder. It stops safely if a step fails.
-- Type text or press keys in the active window, only for configured workflows (`pyautogui`, loaded only when used).
+## Day 4 (Fri 6 Nov): Eyes and hands 👁️✋ — roadmap Phases 5 and 8
+**Core**
+- **Screen understanding:** "what's this error?", "summarise this page". A screenshot is taken **only on command** and sent to Gemini.
+- **Window control:** list, focus, minimise, maximise, snap, arrange ("VS Code left, Chrome right").
+- **File tools:**
+  - search, open, create and rename;
+  - organise Downloads, with a preview and an undo log;
+  - delete moves to the Recycle Bin only and counts as critical.
+
+**Advanced**
+- **Windows UI Automation:** read the real buttons, menus and fields of any app, then click and type **by name** ("click Save", "type hello into the search box").
+- **Multi-step desktop tasks:** each step is previewed, consequential steps ask first, and Max **stops safely** if something looks wrong.
+
+**Stretch**
+- Vision + UI Automation together: "click the blue Sign in button" on screens that have no accessible names.
+
+**Demo:** "what's this error on my screen?" → "put VS Code on the left and Chrome on the right" → "organise my Downloads folder".
+
+## Day 5 (Sat 7 Nov): Developer + gaming companion 💻🎮 — roadmap Phases 6 and 7
+**Core**
+- Projects: recognise a project, open it in VS Code, summarise it.
+- Run its tests and explain failures; explain errors (also read from the screen, using Day 4).
+- Git: status, a summary of changes, a draft commit message; commit and push **only after you confirm**.
 - Gaming mode:
-  - detect configured games by process name, and launch Steam games by name (`steam://` links);
-  - switch to the high-performance power plan;
-  - *suggest* background apps to close (never kills them automatically);
-  - restore everything when you exit.
+  - detect configured games;
+  - launch Steam games by name;
+  - switch the power plan;
+  - *suggest* background apps to close;
+  - **restore everything** afterwards.
 
-**Demo:** "gaming mode, launch <your game>" → play → "I'm done gaming" → the settings are restored.
+**Advanced**
+- **Proposed fixes:** Max shows a fix as a diff and applies it only after you approve; a backup comes first.
+- **Max works on KOVA itself:** "Max, run KOVA's tests and tell me what failed."
+- Steam library awareness: list your installed games.
 
-## Day 6 (Sun 8 Nov): Desktop Dashboard + Tray — roadmap Phase 10 (core)
-- A `PySide6` desktop app:
-  - a chat panel (type or press the mic button);
-  - live CPU/RAM/disk cards, refreshed every ~3 seconds only while the window is open;
-  - an approval pop-up for controlled and critical actions;
-  - an activity log and a memory viewer.
-- A system tray icon: show/hide, quick mic, quit.
-- Voice and dashboard share the same agent core, so a command works the same from either one.
-- **Fallback:** if PySide6 has problems on Python 3.14, we switch to CustomTkinter on the same day.
+**Stretch**
+- Per-game profiles, e.g. close Discord's overlay and set the volume.
 
-**Demo:** the full KOVA window: talk to it, watch the stats, approve an action from the pop-up.
+**Demo:** "open my KOVA project, what changed today, run the tests" → "gaming mode, launch <game>" → "done gaming".
 
-## Day 7 (Mon 9 Nov): Vision, hardening & release — roadmap Phase 8 (lite) + Definition of Done
-- "Look at my screen": a screenshot taken only on command, sent to Gemini to explain an error or what's on screen.
-- Better speech: adjust to background noise once, and an optional push-to-talk hotkey instead of always listening.
-- Hardening:
-  - go through the roadmap's Definition of Done checklist;
-  - test with the internet off;
-  - test with no Gemini key.
-- Measure startup time and idle RAM/CPU and record them in `docs/PERFORMANCE.md`.
-- README rewrite and a one-click `run_kova.bat`; optionally package it as an `.exe` with PyInstaller.
-- Tag `v2.0`.
+## Day 6 (Sun 8 Nov): Natural voice + dashboard 🎙️🖥️ — roadmap Phases 8 and 10
+**Core**
+- **Dashboard (PySide6;** CustomTkinter as a fallback):
+  - a chat panel and a mic button;
+  - the **live agent trace**;
+  - **approval pop-ups**;
+  - system stats (refreshed only while the window is open);
+  - a memory viewer and editor;
+  - settings.
+- **System tray** icon and a **push-to-talk hotkey**.
+- Voice, text and dashboard share one agent core.
 
-**Demo:** the full showcase of everything from Days 1–6, plus "what's this error on my screen?"
+**Advanced**
+- **Real-time voice with the Gemini Live API:**
+  - natural conversation in a natural voice;
+  - **interrupt Max mid-sentence**;
+  - much better accent handling.
+  
+  It runs only while Max is awake. The current voice pipeline stays as the offline fallback.
+
+**Stretch**
+- Live API + tool calls in the same session: talk and act without switching modes.
+
+**Demo:** the full Max window: talk naturally, interrupt it, approve an action from the pop-up.
+
+## Day 7 (Mon 9 Nov): Multi-agent + release 🚀 — roadmap Phase 9 + Definition of Done
+**Core**
+- Hardening: the roadmap's Definition of Done checklist, tests with the internet off, tests with no Gemini key.
+- Measure startup time and idle RAM/CPU, recorded in `docs/PERFORMANCE.md`.
+- README rewrite with a demo script; a one-click `run_max.bat`; tag **v2.0** and a GitHub release.
+
+**Advanced**
+- **Specialist agents:** System, Coding, Research and Media, coordinated by a central planner. Long requests are split between them.
+- Scheduled and event-triggered tasks, building on the Day 2 reminders and Day 3 alerts.
+
+**Stretch**
+- **Phone companion:** commands from your phone over home Wi-Fi, secured with a token and **off by default**.
+- A packaged `.exe` (PyInstaller).
+
+**Demo:** the full showcase, ending with a multi-agent request such as *"research a laptop cooling pad under 5000 rupees and remind me tonight"*.
 
 ---
 
-## After day 7 (backlog)
-- **Phase 9:** specialised sub-agents, scheduled and event-triggered tasks.
-- Plugin architecture and customisable profiles UI.
-- Camera input, offline speech recognition (Vosk), wake-word engine.
-- GPU and temperature monitoring (Windows data is unreliable without vendor tools).
-- Mobile companion / remote access.
+## Backlog (after Day 7)
+- **Local LLM via Ollama** as a second brain provider:
+  - offline mode;
+  - saving Gemini quota on simple routing;
+  - privacy mode.
+  
+  The laptop has a Quadro P620 with 4 GB VRAM, so a 1.5–4B model fits (e.g. Qwen3 1.7B / Llama 3.2 3B). It would load only when needed and unload after idle. **Note:** the roadmap says "no local model inference", so this needs a roadmap change.
+- Offline speech recognition (Whisper/Vosk) and an offline wake-word engine.
+- Camera input (only with clear activation).
+- GPU temperature monitoring (unreliable on Windows without vendor tools).
+- Plugin marketplace and profile UI.
 
 ## Daily routine
 1. **Start:** Claude restates the day's goal and the logic of each module (≈5 min to read).
 2. **Build:** Claude writes the code and tests, then runs the automated tests.
-3. **You test:** voice, real apps, games. You report what broke.
-4. **Fix**, then **commit** with your OK, then tick the day's boxes in this file.
+3. **You test:** voice, real apps, screen, games. You report what broke.
+4. **Fix → commit → push**, with your OK; tick the day's boxes here.
 
 ## Risks
 | Risk | Plan |
 |---|---|
-| Gemini quota/rate limits on the free tier | Local commands first; cache answers; short prompts |
+| Gemini free-tier limits: **measured on Day 2 at ~20 requests/day per model, with no search grounding** | Local-first routing, a model fallback chain, a 6-step cap, short tool descriptions, a daily budget guard; later Ollama or a paid key |
+| Gemini Live API on Python 3.14 / audio streaming | The current voice pipeline stays as the fallback; Live is an *Advanced* item |
+| UI Automation fails in unusual apps | Read before acting, stop on mismatch, use vision as a backup |
 | PySide6 on Python 3.14 | Fall back to CustomTkinter |
-| Speech recognition mishears | Fuzzy matching, a text mode that's always available, push-to-talk |
-| A day overruns | Move its "nice to have" items to the backlog and keep the day's demo working |
+| More testing for you | Every day keeps a text-mode demo, and automated tests cover the logic |
+| A day overruns | Drop Stretch, then Advanced; Core always ships |

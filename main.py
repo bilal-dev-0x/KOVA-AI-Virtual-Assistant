@@ -2,9 +2,11 @@ import argparse
 import json
 import os
 import re
+import sys
 import time
 
 from desktop_agent import Agent
+from modules import reminders
 from modules.logger import get_logger
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -12,8 +14,24 @@ CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 
 # The assistant's name and wake words come from ASSISTANT_NAME / WAKE_WORDS in config.json
 YES_WORDS = ("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "do it", "confirm", "go ahead", "of course")
+# Any of these makes the answer a no, even next to a yes word ("ok, don't close it")
+NO_WORDS = ("no", "nope", "nah", "not", "dont", "never", "cancel", "stop", "wait", "negative", "leave it")
+# Repeating the action back ("close it" to "Should I close calculator?") is also a yes
+ACTION_WORDS = ("open", "close", "restart", "end", "set", "play", "mute")
 
 log = get_logger()
+_instance_lock = None  # kept for the whole run: Windows frees the name when Max exits
+
+
+def single_instance():
+    """False if another Max is already running. Two copies both answer every command."""
+    global _instance_lock
+    if os.name != "nt":
+        return True
+    import ctypes
+    ERROR_ALREADY_EXISTS = 183
+    _instance_lock = ctypes.windll.kernel32.CreateMutexW(None, False, "Local\\KOVA_Max_voice")
+    return ctypes.windll.kernel32.GetLastError() != ERROR_ALREADY_EXISTS
 
 
 def load_config():
@@ -28,10 +46,19 @@ def load_config():
     return {}
 
 
-def is_yes(answer):
-    answer = re.sub(r"[^\w\s]", " ", (answer or "").lower()).split()
-    text = " ".join(answer)
-    return any(text == word or text.startswith(word + " ") for word in YES_WORDS)
+def is_yes(answer, question=""):
+    """True only for a clear yes. 'I said yes' is a yes; 'ok you did well, not close it' is not.
+    Repeating the question's action ("close it" to "Should I close calculator?") counts as yes."""
+    text = (answer or "").lower().replace("'", "").replace("’", "")
+    text = " " + " ".join(re.sub(r"[^\w\s]", " ", text).split()) + " "
+
+    def says(phrase):
+        return f" {phrase} " in text
+
+    if any(says(word) for word in NO_WORDS):
+        return False
+    asked = set(re.findall(r"\w+", question.lower()))
+    return any(says(word) for word in YES_WORDS) or any(says(w) for w in ACTION_WORDS if w in asked)
 
 
 def respond(result, voice, name="KOVA"):
@@ -49,7 +76,7 @@ def respond(result, voice, name="KOVA"):
 def run_text(agent):
     print(f"{agent.name} text mode. Type 'help' for commands, 'exit' to quit.")
 
-    agent.confirm = lambda question: is_yes(input(f"{agent.name}: {question} (yes/no) "))
+    agent.confirm = lambda question: is_yes(input(f"{agent.name}: {question} (yes/no) "), question)
     agent.ask = lambda question: input(f"{agent.name}: {question} ")
 
     while True:
@@ -61,17 +88,30 @@ def run_text(agent):
         if not line.strip():
             continue
 
-        result = agent.handle(line)
-        respond(result, voice=False, name=agent.name)
+        with reminders.hold_short_timers():
+            result = agent.handle(line)
+            respond(result, voice=False, name=agent.name)
         if result.stop:
-            break
+            return result
 
 
 def run_voice(agent):
-    from modules import voice_handler
+    import queue
+
+    from modules import reminders, voice_handler
     from modules.voice_handler import speak
 
     voice_handler.configure(agent.config)
+
+    # A reminder fires on its timer thread; it is printed at once and spoken by
+    # this loop between two listens, so it never talks over Max
+    due = queue.Queue()
+
+    def on_reminder(message):
+        reminders.default_notify(message)
+        due.put(message)
+
+    reminders.on_fire = on_reminder
 
     def listen(wait_seconds=5, max_seconds=10):
         heard = voice_handler.listen_text(wait_seconds=wait_seconds, max_seconds=max_seconds)
@@ -87,9 +127,10 @@ def run_voice(agent):
     def confirm(question):
         answer = ask(question)
         if answer is None:
-            answer = ask("Sorry, I didn't hear you. Yes or no?")
+            # Google often misses a lone "yes", so ask for a few more words
+            answer = ask("Sorry, I didn't hear you. Say yes do it, or no.")
         log.info("Confirmation %r -> %r", question, answer)
-        return is_yes(answer)
+        return is_yes(answer, question)
 
     agent.confirm = confirm
     agent.ask = ask
@@ -106,6 +147,9 @@ def run_voice(agent):
     print(f"Say '{agent.name}' to wake me up.")
 
     while True:
+        while not due.empty():
+            speak(f"Reminder, {agent.title}: {due.get()}")
+
         if awake and timeout and time.time() - last_active > timeout:
             awake = False
             print(f"💤 No commands for {timeout} seconds, going to sleep.")
@@ -136,13 +180,15 @@ def run_voice(agent):
             if not command:
                 continue
 
-        result = agent.handle(command)
-        respond(result, voice=True, name=agent.name)
+        # A 10 second timer counts from when Max finished saying "timer set"
+        with reminders.hold_short_timers():
+            result = agent.handle(command)
+            respond(result, voice=True, name=agent.name)
         # Count from when Max finished speaking, so long answers don't use up the timeout
         last_active = time.time()
 
         if result.stop:
-            break
+            return result
         if result.sleep:
             awake = False
 
@@ -153,19 +199,29 @@ def main():
     parser.add_argument("--mic-test", action="store_true", help="show live mic levels and a suggested threshold")
     args = parser.parse_args()
 
+    # Emoji and trace arrows must not crash when output is redirected (Windows defaults to cp1252)
+    for stream in (sys.stdout, sys.stderr):
+        stream.reconfigure(encoding="utf-8", errors="replace")
+
     if args.mic_test:
         from modules.voice_handler import mic_test
         mic_test()
         return
 
-    agent = Agent(load_config())
-    log.info("KOVA started in %s mode", "text" if args.text else "voice")
+    if not args.text and not single_instance():
+        print("Max is already running in another window. Close that one first, or say 'restart yourself' to it.")
+        log.info("Second copy refused: Max is already running")
+        return
 
     try:
-        if args.text:
-            run_text(agent)
-        else:
-            run_voice(agent)
+        while True:
+            # "restart yourself" comes back here with config.json read again
+            agent = Agent(load_config())
+            log.info("KOVA started in %s mode", "text" if args.text else "voice")
+            result = run_text(agent) if args.text else run_voice(agent)
+            if not (result and result.restart):
+                break
+            log.info("KOVA restarting")
     except KeyboardInterrupt:
         print("\nKOVA shutting down.")
 
