@@ -8,7 +8,26 @@ from modules.logger import get_logger
 # so text mode starts fast and never loads them.
 
 log = get_logger()
-_offline_engine = None
+
+# Max speaks with a male or a female voice (VOICE in config.json, or "use a male voice").
+# Natural voices come from Microsoft Edge's read-aloud service (edge-tts, needs internet);
+# when it fails, female falls back to Google's voice and male to the Windows voice David.
+VOICES = {"male": "en-US-GuyNeural", "female": "en-US-JennyNeural"}
+OFFLINE_VOICES = {"male": "david", "female": "zira"}
+EDGE_RETRY_SECONDS = 120  # after a failure, use the fallback this long instead of waiting again
+_gender = "female"
+_edge_down_until = 0.0
+
+
+def set_voice(gender):
+    global _gender
+    if gender not in VOICES:
+        raise ValueError(f"unknown voice {gender!r}")
+    _gender = gender
+
+
+def current_voice():
+    return _gender
 
 
 def _pronounce(text):
@@ -18,12 +37,33 @@ def _pronounce(text):
     return text
 
 
+def _edge_mp3(text, filename):
+    """Save text as speech with the natural voice. Returns False if the service failed."""
+    global _edge_down_until
+    if time.time() < _edge_down_until:
+        return False
+    try:
+        import asyncio
+        import edge_tts
+        speech = edge_tts.Communicate(text, VOICES[_gender], connect_timeout=5, receive_timeout=6)
+        asyncio.run(speech.save(filename))
+        return True
+    except Exception as e:
+        log.warning("Natural voice failed (%s), using the fallback for %ss", type(e).__name__, EDGE_RETRY_SECONDS)
+        _edge_down_until = time.time() + EDGE_RETRY_SECONDS
+        return False
+
+
 def _speak_online(text):
     import pygame
-    from gtts import gTTS
 
-    filename = os.path.join(tempfile.gettempdir(), "kova_voice.mp3")
-    gTTS(text=text, lang="en").save(filename)
+    # One file per running Max, so two copies never fight over it
+    filename = os.path.join(tempfile.gettempdir(), f"kova_voice_{os.getpid()}.mp3")
+    if not _edge_mp3(text, filename):
+        if _gender != "female":
+            raise RuntimeError("no online male voice")  # speak() falls back to David
+        from gtts import gTTS
+        gTTS(text=text, lang="en").save(filename)
 
     pygame.mixer.init()
     pygame.mixer.music.load(filename)
@@ -39,16 +79,17 @@ def _speak_online(text):
 
 
 def _speak_offline(text):
-    # pyttsx3 uses the voices built into Windows, so it works without internet
-    global _offline_engine
+    # pyttsx3 uses the voices built into Windows, so it works without internet.
+    # A fresh engine every time: a reused one went silent from the second line on
     import pyttsx3
 
-    if _offline_engine is None:
-        _offline_engine = pyttsx3.init()
-        _offline_engine.setProperty("rate", 175)
-
-    _offline_engine.say(text)
-    _offline_engine.runAndWait()
+    engine = pyttsx3.init()
+    engine.setProperty("rate", 175)
+    _choose_offline_voice(engine)
+    engine.say(text)
+    engine.runAndWait()
+    engine.stop()
+    del engine
 
 
 def speak(text):
@@ -56,7 +97,7 @@ def speak(text):
     try:
         _speak_online(text)
     except Exception as e:
-        log.warning("gTTS failed (%s), using offline voice", e)
+        log.warning("Online voice failed (%s), using the Windows voice", e)
         try:
             _speak_offline(text)
         except Exception as e:
@@ -97,18 +138,34 @@ MIN_THRESHOLD = 100      # never treat near-silence as speech
 # while the parts of speech that make words understandable sit around 1-4 kHz.
 SPEECH_BAND = (1000, 4000)
 HIGH_PASS_HZ = 200       # hum below this is removed before audio goes to Google
+PAD_SECONDS = 0.3        # silence added around each clip: Google often misses a short lone word
 SKIP_CHUNKS = 2          # the first 200 ms after the mic opens often contain a click
 ADAPT_RATE = 0.05        # how fast the room-noise estimate follows quiet moments
 
 _noise = None            # current estimate of the room's background level
 _fixed_threshold = None  # MIC_THRESHOLD from config.json, if set
+_language = "en-US"      # SPEECH_LANGUAGE from config.json, e.g. "ur-PK" for Urdu
+
+
+def _choose_offline_voice(engine):
+    wanted = OFFLINE_VOICES[_gender]
+    for voice in engine.getProperty("voices"):
+        if wanted in voice.name.lower():
+            engine.setProperty("voice", voice.id)
+            return
 
 
 def configure(config):
     """MIC_THRESHOLD in config.json turns off auto-calibration (see: python main.py --mic-test)."""
-    global _fixed_threshold
+    global _fixed_threshold, _language
     if config.get("MIC_THRESHOLD"):
         _fixed_threshold = float(config["MIC_THRESHOLD"])
+    # Google listens for one language at a time; commands are matched in English
+    _language = config.get("SPEECH_LANGUAGE") or "en-US"
+    for gender in VOICES:
+        VOICES[gender] = config.get(f"VOICE_{gender.upper()}") or VOICES[gender]
+    if config.get("VOICE") in VOICES:
+        set_voice(config["VOICE"])
 
 
 def current_threshold():
@@ -232,7 +289,9 @@ def record_phrase(wait_seconds=5, max_seconds=10):
     if not phrase:
         return None
     log.info("Recorded %.1fs (threshold %.0f)", len(phrase) * CHUNK_SECONDS, current_threshold())
-    return sr.AudioData(_remove_hum(np.concatenate(phrase)).tobytes(), SAMPLE_RATE, 2)
+    pad = np.zeros(int(SAMPLE_RATE * PAD_SECONDS), dtype=np.int16)
+    samples = np.concatenate([pad, _remove_hum(np.concatenate(phrase)), pad])
+    return sr.AudioData(samples.tobytes(), SAMPLE_RATE, 2)
 
 
 def mic_test(seconds=15):
@@ -271,7 +330,7 @@ def recognize(audio):
         return None
 
     try:
-        return sr.Recognizer().recognize_google(audio)
+        return sr.Recognizer().recognize_google(audio, language=_language)
     except sr.UnknownValueError:
         return None
     except sr.RequestError:

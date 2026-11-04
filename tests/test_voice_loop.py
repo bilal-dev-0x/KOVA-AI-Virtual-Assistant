@@ -1,3 +1,5 @@
+import pytest
+
 import main
 from desktop_agent import Agent
 from modules import voice_handler
@@ -74,14 +76,19 @@ def test_confirmation_asks_again_when_nothing_heard(monkeypatch):
     monkeypatch.setattr(system_control, "close_app", lambda name: closed.append(name) or Result(True, "Closed"))
 
     _, spoken = run(monkeypatch, ["max close notepad", None, "yes", "goodbye"])
-    assert "Sorry, I didn't hear you. Yes or no?" in spoken
+    assert "Sorry, I didn't hear you. Say yes do it, or no." in spoken
     assert closed == ["notepad"]
 
 
 def test_single_word_noise_not_sent_to_gemini(monkeypatch):
     import desktop_agent
     asked = []
-    monkeypatch.setattr(desktop_agent.ai_brain, "ask", lambda text, config: asked.append(text) or "answer")
+
+    class Provider:
+        def session(self, system_prompt, tools):
+            asked.append("session")
+
+    monkeypatch.setattr(desktop_agent.brain, "get_provider", lambda config: Provider())
     _, spoken = run(monkeypatch, ["max", "goa", "goodbye"])
     assert asked == []
     assert "Sorry, I didn't catch that." in spoken
@@ -101,3 +108,35 @@ def test_is_yes():
     assert not main.is_yes("no")
     assert not main.is_yes(None)
     assert not main.is_yes("yesterday")
+
+
+@pytest.mark.parametrize("answer", ["I said yes", "yes yes", "yes yes close", "ok go ahead", "sure, do it"])
+def test_yes_anywhere_in_the_answer(answer):
+    assert main.is_yes(answer)
+
+
+@pytest.mark.parametrize("answer", [
+    "ok you did well not close it",   # the Day 2 voice test: this used to count as yes
+    "okay don't close it",
+    "yes no wait",
+    "no no no",
+    "ok cancel",
+    "nope",
+])
+def test_any_no_word_means_no(answer):
+    assert not main.is_yes(answer)
+
+
+@pytest.mark.parametrize("answer", ["close it", "yes close it", "close calculator yes"])
+def test_repeating_the_action_is_a_yes(answer):
+    # Heard in the relay voice test: "close it" to "Should I close calculator?" was a no
+    assert main.is_yes(answer, "Should I close calculator?")
+
+
+@pytest.mark.parametrize("answer, question", [
+    ("close it", "Should I open chrome?"),        # a different action
+    ("don't close it", "Should I close calculator?"),
+    ("close it", ""),
+])
+def test_action_words_need_a_matching_question(answer, question):
+    assert not main.is_yes(answer, question)

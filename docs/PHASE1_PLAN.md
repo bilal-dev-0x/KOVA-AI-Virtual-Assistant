@@ -1,5 +1,10 @@
 # KOVA 2.0 — Phase 1 Plan: Foundation
 
+> **Superseded note:** `modules/ai_brain.py` mentioned below was replaced by the
+> `brain/` package (`brain/base.py`, `brain/gemini.py`, `brain/relay.py`,
+> `brain/budget.py`) once the provider/agent split landed. This document is kept
+> as the Day 1 record; see `KOVA_7_DAY_PLAN.md` for current status.
+
 **Goal:** a stable, testable desktop assistant core that the later phases can build on.
 **Roadmap rule:** one milestone at a time. Explain the logic first, test the module on its own, then commit.
 **Schedule:** this is Day 1 of the [7-day plan](KOVA_7_DAY_PLAN.md). Milestones 0–4 happen on Day 1; Milestone 5's measurements and README move to Day 7.

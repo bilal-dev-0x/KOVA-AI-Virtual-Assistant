@@ -21,6 +21,11 @@ def test_normalize(raw, expected):
     assert normalize(raw) == expected
 
 
+class GeminiMustNotBeUsed:
+    def session(self, system_prompt, tools):
+        pytest.fail("went to Gemini")
+
+
 MAX_CONFIG = {"ASSISTANT_NAME": "Max", "WAKE_WORDS": ["max", "imax", "macs", "maks", "mac"]}
 
 
@@ -103,8 +108,10 @@ def test_fallback_without_gemini_key_does_not_crash(agent):
     assert "Gemini isn't set up" in result.message
 
 
-def test_fallback_uses_gemini_answer(agent, monkeypatch):
-    monkeypatch.setattr(desktop_agent.ai_brain, "ask", lambda text, config: "Black holes are dense.")
+def test_fallback_uses_gemini_answer():
+    from brain.base import Reply
+    from tests.conftest import FakeProvider
+    agent = Agent(provider=FakeProvider([Reply(text="Black holes are dense.")]))
     assert agent.handle("explain black holes").message == "Black holes are dense."
 
 
@@ -196,9 +203,8 @@ def test_article_removed_from_target(agent):
 
 @pytest.mark.parametrize("text", ["open", "close", "close the", "restart"])
 def test_missing_target_asks_instead_of_gemini(text, monkeypatch):
-    monkeypatch.setattr(desktop_agent.ai_brain, "ask", lambda t, c: pytest.fail("went to Gemini"))
     asked = []
-    agent = Agent()
+    agent = Agent(provider=GeminiMustNotBeUsed())
     agent.ask = lambda q: asked.append(q) or None
     result = agent.handle(text)
     assert asked and asked[0].endswith("what?")
@@ -261,3 +267,142 @@ def test_media_commands(text, key, agent, monkeypatch):
 
 def test_play_song_still_works_after_media_commands(agent):
     assert agent.match("play believer")[0].name == "play"
+
+
+@pytest.mark.parametrize("text", ["force close calculator", "close calculator anyway", "close calculator forcefully"])
+def test_force_close_asks_with_a_warning(monkeypatch, text):
+    monkeypatch.setattr(desktop_agent.system_control, "check_force", lambda name: (name, None))
+    forced = []
+    monkeypatch.setattr(desktop_agent.system_control, "force_close",
+                        lambda name: forced.append(name) or Result(True, "Force closed"))
+    questions = []
+    agent = Agent(confirm=lambda q: questions.append(q) or True)
+    assert agent.handle(text).success
+    assert questions == ["Force close calculator? Anything unsaved in it will be lost."]
+    assert forced == ["calculator"]
+
+
+def test_force_it_means_the_last_app(monkeypatch):
+    monkeypatch.setattr(desktop_agent.system_control, "check_force", lambda name: (name, None))
+    forced = []
+    monkeypatch.setattr(desktop_agent.system_control, "force_close",
+                        lambda name: forced.append(name) or Result(True, "Force closed"))
+    agent = Agent(confirm=lambda q: True)
+    agent.runner.last_target = "calculator"
+    agent.handle("force it")
+    assert forced == ["calculator"]
+
+
+@pytest.mark.parametrize("text, args", [
+    ("search for cats", {"query": "cats"}),
+    ("google weather lahore", {"query": "weather lahore"}),
+    ("search for lofi on youtube", {"query": "lofi", "site": "youtube"}),
+    ("search youtube for lofi", {"query": "lofi", "site": "youtube"}),
+])
+def test_search_opens_the_browser(monkeypatch, text, args):
+    from modules import tool_registry
+    searched = []
+    monkeypatch.setattr(tool_registry.get("open_web_search"), "func",
+                        lambda **kw: searched.append(kw) or Result(True, "Searching"))
+    Agent().handle(text)
+    assert searched == [args]
+
+
+def test_vague_search_asks_what_to_search(monkeypatch):
+    # Heard 4 times in the relay voice test, and Max said nothing useful
+    from modules import tool_registry
+    searched = []
+    monkeypatch.setattr(tool_registry.get("open_web_search"), "func",
+                        lambda **kw: searched.append(kw) or Result(True, "Searching"))
+    agent = Agent()
+    questions = []
+    agent.ask = lambda q: questions.append(q) or "pakistan cricket score"
+    agent.handle("can you search anything")
+    assert questions == ["What should I search for?"]
+    assert searched == [{"query": "pakistan cricket score"}]
+
+
+def test_gpu_command_stays_local():
+    agent = Agent()
+    command, _ = agent.match(agent.normalize("words uses of my GPU"))
+    assert command.name == "gpu"
+
+
+def test_play_unknown_song_plays_the_first_video(agent, monkeypatch):
+    from modules import tools
+    monkeypatch.setattr(tools, "first_youtube_video", lambda query: "https://www.youtube.com/watch?v=abcdefghijk")
+    opened = []
+    monkeypatch.setattr(desktop_agent.system_control, "open_url", lambda url, config=None: opened.append(url))
+    assert agent.handle("play bachke bachke karan aujla").message == "Playing bachke bachke karan aujla from YouTube."
+    assert opened == ["https://www.youtube.com/watch?v=abcdefghijk"]
+
+
+# ---------- fixes from the relay voice test ----------
+
+@pytest.mark.parametrize("text", ["close yourself close yourself", "close yourself you idiot",
+                                  "ok wax close yourself", "max please close yourself now"])
+def test_close_yourself_with_extra_words_exits(agent, text):
+    assert agent.handle(text).stop
+
+
+def test_close_never_treats_yourself_as_an_app(agent):
+    command, _ = agent.match(agent.normalize("close yourself close yourself"))
+    assert command.name == "exit"
+
+
+def test_misheard_claude_goes_to_the_agent():
+    # "ok Claude, check the logs" was heard as "ok close check all logs"
+    from brain.base import Reply
+    from tests.conftest import FakeProvider
+    provider = FakeProvider([Reply(text="Checking the logs.")])
+    agent = Agent({"AGENT_TRACE": False}, provider=provider)
+    assert agent.handle("ok close check all logs").message == "Checking the logs."
+
+
+def test_unknown_single_word_app_still_says_so():
+    from brain.base import Reply
+    from tests.conftest import FakeProvider
+    agent = Agent({"AGENT_TRACE": False}, provider=FakeProvider([Reply(text="should not be asked")]))
+    assert agent.handle("close flibber").message == "I don't know an app called flibber."
+
+
+def test_close_what_answer_goes_to_the_agent_too():
+    from brain.base import Reply
+    from tests.conftest import FakeProvider
+    provider = FakeProvider([Reply(text="Okay.")])
+    agent = Agent({"AGENT_TRACE": False}, provider=provider)
+    agent.ask = lambda question: "check blogs"
+    assert agent.handle("ok close").message == "Okay."
+    assert "check blogs" in provider.fake_session.sent[0]
+
+
+@pytest.mark.parametrize("text", ["can you download anything", "what is kova", "who are you"])
+def test_short_questions_get_an_answer(text):
+    from brain.base import Reply
+    from tests.conftest import FakeProvider
+    agent = Agent({"AGENT_TRACE": False}, provider=FakeProvider([Reply(text="Here is my answer.")]))
+    agent.min_ai_words = 3
+    assert agent.handle(text).message == "Here is my answer."
+
+
+def test_short_noise_is_still_ignored():
+    from brain.base import Reply
+    from tests.conftest import FakeProvider
+    agent = Agent({"AGENT_TRACE": False}, provider=FakeProvider([Reply(text="should not be asked")]))
+    agent.min_ai_words = 3
+    assert agent.handle("god god").message == "Sorry, I didn't catch that."
+
+
+@pytest.mark.parametrize("text, name", [("open start menu", "start menu"), ("search in start menu", "start menu"),
+                                        ("daily news", "news"), ("list app", "list apps"),
+                                        ("open terminal", "open")])
+def test_new_phrases(agent, text, name):
+    command, _ = agent.match(agent.normalize(text))
+    assert command.name == name
+
+
+def test_search_for_a_website_opens_it(agent, monkeypatch):
+    opened = []
+    monkeypatch.setattr(desktop_agent.system_control, "open_url", lambda url, config=None: opened.append(url))
+    agent.handle("search discord com in browser")
+    assert opened == ["https://www.discord.com/"]

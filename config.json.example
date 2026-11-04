@@ -1,6 +1,10 @@
 {
   "GEMINI_API_KEY": "PASTE_YOUR_GEMINI_API_KEY_HERE",
   "GEMINI_MODEL": "gemini-3.6-flash",
+  "GEMINI_DAILY_LIMIT": 100,
+  "GEMINI_THINKING": "low",
+  "BRAIN_PROVIDER": "gemini",
+  "AGENT_TRACE": true,
   "NEWS_API_KEY": "",
   "NEWS_COUNTRY": "pk",
   "USER_TITLE": "Commander",
@@ -11,7 +15,13 @@
     "imax",
     "macs",
     "maks",
-    "mac"
+    "mac",
+    "wax",
+    "mex",
+    "maxx",
+    "mx"
   ],
-  "AWAKE_TIMEOUT": 60
+  "AWAKE_TIMEOUT": 60,
+  "SPEECH_LANGUAGE": "en-US",
+  "VOICE": "female"
 }

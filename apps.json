@@ -25,6 +25,11 @@
       "launch": {"appid": "com.squirrel.GitHubDesktop.GitHubDesktop"},
       "process": ["GitHubDesktop.exe"]
     },
+    "claude": {
+      "aliases": ["cloud", "cloth", "clod", "clawed", "claude app", "claude desktop"],
+      "launch": {"appid": "Claude_pzs8sxrjxfjjc!Claude"},
+      "process": ["claude.exe"]
+    },
     "discord": {
       "aliases": [],
       "launch": {"appid": "com.squirrel.Discord.Discord"},
@@ -69,6 +74,10 @@
       "aliases": ["windows settings"],
       "launch": {"uri": "ms-settings:"},
       "process": ["SystemSettings.exe"]
+    },
+    "terminal": {
+      "aliases": ["powershell", "windows terminal", "command line"],
+      "launch": {"uri": "powershell.exe"}
     }
   },
   "websites": {
