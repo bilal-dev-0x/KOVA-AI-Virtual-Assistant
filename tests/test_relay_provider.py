@@ -14,6 +14,11 @@ class FakeTool:
     description = "Open an app"
 
 
+@pytest.fixture(autouse=True)
+def watcher_is_watching(tmp_path):
+    (tmp_path / "watching").touch()
+
+
 def answer_with(folder, make_answer):
     """Play Claude: wait for request.json, then write response.json."""
     seen = []
