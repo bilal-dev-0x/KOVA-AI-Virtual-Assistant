@@ -12,10 +12,15 @@ from modules.logger import get_logger
 # Replies still go through Max's tool registry and permission checks, like Gemini's.
 #
 # response.json: {"id": "<request id>", "text": "...", "calls": [{"name": "...", "args": {...}}]}
+#
+# The watcher touches logs/relay/watching every second or so. When that file is old,
+# nobody is watching, so Max says so at once instead of going deaf for RELAY_TIMEOUT.
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 RELAY_DIR = BASE_DIR / "logs" / "relay"
 POLL_SECONDS = 0.3
+HEARTBEAT_SECONDS = 15
+NOT_WATCHING = "Claude isn't watching right now, so I can't answer that. Local commands still work."
 
 log = get_logger()
 
@@ -33,6 +38,15 @@ class RelayProvider(Provider):
     def __init__(self, config, folder=None):
         self.folder = Path(folder or RELAY_DIR)
         self.timeout = config.get("RELAY_TIMEOUT", 180)
+        # Voice mode sets this: it listens briefly and returns True if the user said "cancel"
+        self.while_waiting = None
+
+    def watching(self):
+        """True if the watcher touched its heartbeat file in the last HEARTBEAT_SECONDS."""
+        try:
+            return time.time() - (self.folder / "watching").stat().st_mtime < HEARTBEAT_SECONDS
+        except OSError:
+            return False
 
     def session(self, system_prompt, tools):
         return RelaySession(self, system_prompt, tools)
@@ -40,20 +54,29 @@ class RelayProvider(Provider):
     def ask(self, request):
         """Send one request and wait for its answer."""
         self.folder.mkdir(parents=True, exist_ok=True)
+        if not self.watching():
+            raise BrainError(NOT_WATCHING)
         request_file = self.folder / "request.json"
         response_file = self.folder / "response.json"
         response_file.unlink(missing_ok=True)
 
         request["id"] = uuid.uuid4().hex[:8]
         _write_json(request_file, request)
-        print("⏳ Waiting for Claude to answer...")
+        print("⏳ Waiting for Claude to answer..." + (" Say cancel to stop waiting." if self.while_waiting else ""))
         deadline = time.time() + self.timeout
         try:
             while time.time() < deadline:
                 answer = self._read(response_file, request["id"])
                 if answer is not None:
                     return answer
-                time.sleep(POLL_SECONDS)
+                if not self.watching():
+                    raise BrainError("Claude stopped watching, so I gave up on that one.")
+                if self.while_waiting:
+                    if self.while_waiting():
+                        log.info("Relay wait cancelled by the user")
+                        raise BrainError("Okay, I stopped waiting.")
+                else:
+                    time.sleep(POLL_SECONDS)
         finally:
             request_file.unlink(missing_ok=True)
         raise BrainError("Claude didn't answer in time. Is the chat session watching?")

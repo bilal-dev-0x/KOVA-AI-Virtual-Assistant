@@ -33,6 +33,7 @@ class Command:
 # Words people put in front of a command: "now open github", "I said close chrome"
 FILLER_PREFIX = re.compile(
     r"^(please|can you|could you|would you|will you|now|then|also|and|so|ok|okay|just|again|"
+    r"fine|alright|all right|right(?! click)|"
     r"i said|i mean|i am saying|im saying|i told you|i want you to|um|uh)\b ?"
 )
 ARTICLE = re.compile(r"^(the|my|a|an)( |$)")

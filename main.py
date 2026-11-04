@@ -13,11 +13,15 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 
 # The assistant's name and wake words come from ASSISTANT_NAME / WAKE_WORDS in config.json
-YES_WORDS = ("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "do it", "confirm", "go ahead", "of course")
+YES_WORDS = ("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "alright", "all right", "do it", "confirm",
+             "go ahead", "of course")
 # Any of these makes the answer a no, even next to a yes word ("ok, don't close it")
 NO_WORDS = ("no", "nope", "nah", "not", "dont", "never", "cancel", "stop", "wait", "negative", "leave it")
 # Repeating the action back ("close it" to "Should I close calculator?") is also a yes
 ACTION_WORDS = ("open", "close", "restart", "end", "set", "play", "mute")
+
+# Said while Max waits for a slow brain answer
+CANCEL = re.compile(r"\b(cancel|stop|never ?mind|forget (it|that)|leave it)\b")
 
 log = get_logger()
 _instance_lock = None  # kept for the whole run: Windows frees the name when Max exits
@@ -73,16 +77,29 @@ def respond(result, voice, name="KOVA"):
                 speak(line)
 
 
+END_OF_INPUT = {"\x04", "\x1a"}  # Ctrl+D / Ctrl+Z typed on a Windows console arrive as text
+
+
+def typed(prompt):
+    """input() that returns None at the end of input instead of raising EOFError."""
+    try:
+        line = input(prompt)
+    except EOFError:
+        return None
+    return None if line.strip() in END_OF_INPUT else line
+
+
 def run_text(agent):
     print(f"{agent.name} text mode. Type 'help' for commands, 'exit' to quit.")
 
-    agent.confirm = lambda question: is_yes(input(f"{agent.name}: {question} (yes/no) "), question)
-    agent.ask = lambda question: input(f"{agent.name}: {question} ")
+    # Ending input in the middle of a question is a no, not a crash
+    agent.confirm = lambda question: is_yes(typed(f"{agent.name}: {question} (yes/no) "), question)
+    agent.ask = lambda question: typed(f"{agent.name}: {question} ")
 
     while True:
-        try:
-            line = input("You: ")
-        except EOFError:
+        line = typed("You: ")
+        if line is None:
+            print()
             break
 
         if not line.strip():
@@ -102,6 +119,20 @@ def run_voice(agent):
     from modules.voice_handler import speak
 
     voice_handler.configure(agent.config)
+
+    def cancel_heard():
+        """While the relay brain is thinking, keep the mic open for "cancel"."""
+        heard = voice_handler.listen_text(wait_seconds=2, max_seconds=4)
+        if not heard:
+            return False
+        log.info("Heard while waiting: %s", heard)
+        if CANCEL.search(heard.lower()):
+            return True
+        print(f"(Still waiting for Claude. Say cancel to stop. Heard: {heard})")
+        return False
+
+    if hasattr(agent.provider, "while_waiting"):
+        agent.provider.while_waiting = cancel_heard
 
     # A reminder fires on its timer thread; it is printed at once and spoken by
     # this loop between two listens, so it never talks over Max
