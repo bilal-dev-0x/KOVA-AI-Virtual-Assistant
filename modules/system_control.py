@@ -72,6 +72,12 @@ def _guess_process(app_name):
     return []
 
 
+def is_app_alias(name):
+    """True if name is exactly an app's name or alias in apps.json ("google chrome")."""
+    name = name.lower().strip()
+    return any(name == key or name in entry.get("aliases", []) for key, entry in load_apps().get("apps", {}).items())
+
+
 def resolve(name):
     """Find what the user means by name.
 
