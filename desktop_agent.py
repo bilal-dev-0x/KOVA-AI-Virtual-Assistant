@@ -269,7 +269,7 @@ class Agent:
             Command("exit", rf"^(exit|quit|goodbye|bye|good bye|(stop|shut down|close|quit|exit) ({wake}))$"
                             r"|\b(close|quit|exit|stop|shut down|turn off) yourself\b|\b(shut|turn) yourself (down|off)\b",
                     self.exit, help="exit / goodbye"),
-            Command("restart yourself", r"\b(restart|reboot|reload|refresh) (yourself|max|kova)\b",
+            Command("restart yourself", rf"\b(restart|reboot|reload|refresh) (yourself|{wake})\b",
                     self.restart, help="restart yourself (reads config.json again)"),
             Command("sleep", r"^(sleep|go to sleep|thats all|that is all|stop listening|thats it|thats all for now)$",
                     self.sleep, help="go to sleep (voice mode)"),
@@ -314,17 +314,22 @@ class Agent:
                     lambda arg: tool("top_processes"), help="top processes / what is using my ram"),
             Command("new tab", r"^(open )?(a )?(new )?tab( in (google|chrome|the browser|browser))?$",
                     lambda arg: tool("open_app", name="google"), help="open a new tab"),
-            Command("check logs", r"^(check|read|show|tell me)( the| my| your)? (logs?|locks?|blogs?|errors?|problems?)$",
+            Command("check logs", r"^(check|read|show|tell me)( me)?( the| my| your)? "
+                                 r"(logs?|locks?|blogs?|errors?|problems?)$",
                     lambda arg: tool("recent_problems"), help="check logs"),
             # Task Manager can't be opened on a chosen tab from outside, so Max says where to click
             Command("task manager tab", r"\b(?P<arg>performance|processes|startup|app history|users|details|services)"
-                                        r"( tab)?\b.*\btask manager\b",
+                                        r"( tab)?\b.*\btask manager\b"
+                                        r"|\btask manager\b.*\b(?P<arg2>performance|processes|startup|app history"
+                                        r"|users|details|services)\b",
                     self.task_manager_tab),
             Command("start menu", r"\b(open|show|press|search in|search on)( the)? start menu\b|^start menu$",
                     lambda arg: tool("open_start_menu"), help="open start menu"),
-            Command("new window", r"^(open )?(a |one )?(new|another|more|one more|second|extra) window"
-                                  r"( of| in| for)? (?P<arg>.+)$|^open (?P<arg2>.+?) in a new window$",
-                    lambda arg: tool("new_window", name=arg), help="new window of <app>"),
+            # "windows?" so "open new windows" isn't new_window(name="s")
+            Command("new window", r"^(open )?(a |one )?(new|another|more|one more|second|extra) windows?"
+                                  r"( (of|in|for))?( (?P<arg>.+))?$|^open (?P<arg2>.+?) in a new window$",
+                    lambda arg: tool("new_window", name=arg), help="new window of <app>",
+                    ask_text="New window of what?"),
             Command("open", r"^(open|launch|start)( (?P<arg>.+))?$",
                     lambda arg: tool("open_app", name=arg), help="open <app or website>", ask_text="Open what?"),
             # "force close calculator", "close it anyway", "force it" after a close failed
@@ -341,7 +346,8 @@ class Agent:
                     lambda arg: tool("restart_app", name=arg), level=CONTROLLED, help="restart <app>",
                     confirm_text="Restart {arg}?", ask_text="Restart what?",
                     prepare=lambda arg: system_control.check_app(arg)),
-            Command("system status", r"^(status|health|report)$|\b(system (status|report|health)|(pc|computer|laptop) (status|health))\b",
+            Command("system status", r"^(status|health|report)$|\b(system (status|report|health)|(pc|computer|laptop) (status|health))\b"
+                                     r"|^check( my| the)? (system|pc|computer|laptop)$",
                     lambda arg: tool("system_status"), help="system status"),
             # "how much is chrome using my ram" is about one program, not the whole PC
             Command("program memory", r"^how much (ram|memory) (is|does) (?P<arg>.+?) (using|use|taking|take|consuming)$"
@@ -421,6 +427,10 @@ class Agent:
         # requests with several parts go to the agent
         if self.provider and needs_agent(text):
             return self._ask_agent(raw_text)
+
+        if text.startswith("google ") and system_control.is_app_alias(text):
+            # "google chrome" is the app, not a Google search for "chrome"
+            text = f"open {text}"
 
         command, arg = self.match(text)
         if command is None:

@@ -406,3 +406,39 @@ def test_search_for_a_website_opens_it(agent, monkeypatch):
     monkeypatch.setattr(desktop_agent.system_control, "open_url", lambda url, config=None: opened.append(url))
     agent.handle("search discord com in browser")
     assert opened == ["https://www.discord.com/"]
+
+
+# ---------- routing gaps found by a phrase sweep ----------
+
+@pytest.mark.parametrize("text, name, arg", [
+    ("google chrome", "open", "google chrome"),          # the app, not a search for "chrome"
+    ("google weather lahore", "search", "weather lahore"),
+    ("open task manager performance", "task manager tab", "performance"),
+    ("open performance tab in task manager", "task manager tab", "performance"),
+    ("check my system", "system status", None),
+    ("check the pc", "system status", None),
+    ("open new windows", "new window", None),           # was new_window(name="s")
+    ("open a new window of brave", "new window", "brave"),
+    ("new window chrome", "new window", "chrome"),
+])
+def test_phrase_sweep_routes(text, name, arg):
+    agent = Agent()
+    normal = agent.normalize(text)
+    if text.startswith("google ") and desktop_agent.system_control.is_app_alias(normal):
+        normal = f"open {normal}"
+    command, found = agent.match(normal)
+    assert (command.name, found) == (name, arg)
+
+
+def test_google_chrome_opens_the_app(monkeypatch):
+    opened = []
+    monkeypatch.setattr(desktop_agent.system_control, "open_target",
+                        lambda name, config=None: opened.append(name) or Result(True, f"Opening {name}"))
+    Agent().handle("google chrome")
+    assert opened == ["google chrome"]
+
+
+def test_restart_yourself_uses_the_assistant_name():
+    agent = Agent({"ASSISTANT_NAME": "Nova", "WAKE_WORDS": ["nova"]})
+    assert agent.match("restart nova")[0].name == "restart yourself"
+    assert agent.match("restart max")[0].name == "restart"   # "max" is just an app name now

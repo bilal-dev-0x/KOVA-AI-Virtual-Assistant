@@ -141,6 +141,28 @@ def test_a_broken_reply_does_not_kill_the_assistant(text, apps):
     assert agent.session.resets == 1
 
 
+@pytest.mark.parametrize("text, command, arg", [
+    # "new window" without an app must ask, not fall through to open("new window")
+    ("open a new window", "new window", None),
+    ("new window", "new window", None),
+    ("new window of chrome", "new window", "chrome"),
+    ("open chrome in a new window", "new window", "chrome"),
+    # "show me the ..." is how people actually ask
+    ("show me the problems", "check logs", None),
+    ("show me the errors", "check logs", None),
+    ("check the logs", "check logs", None),
+    # ...and these must keep their own commands
+    ("tell me the news", "news", None),
+    ("show running apps", "list apps", None),
+    ("open chrome", "open", "chrome"),
+])
+def test_command_routing(text, command, arg):
+    matched, matched_arg = Agent({"AGENT_TRACE": False}).match(
+        Agent({"AGENT_TRACE": False}).normalize(text))
+    assert matched is not None and matched.name == command, f"{text!r} routed to {matched}"
+    assert matched_arg == arg
+
+
 @pytest.mark.parametrize("call, error", [
     (("format_disk", {}), "no tool called format_disk"),
     (("close_app", {}), "missing argument: name"),
