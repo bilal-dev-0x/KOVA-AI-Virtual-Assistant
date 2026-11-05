@@ -6,7 +6,7 @@ import sys
 import time
 
 from desktop_agent import Agent
-from modules import reminders
+from modules import alerts, reminders
 from modules.logger import get_logger
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -141,9 +141,14 @@ def run_voice(agent):
 
     def on_reminder(message):
         reminders.default_notify(message)
-        due.put(message)
+        due.put(f"Reminder, {agent.title}: {message}")
+
+    def on_alert(message):
+        alerts.default_notify(message)
+        due.put(f"Heads up, {agent.title}. {message}")
 
     reminders.on_fire = on_reminder
+    alerts.on_alert = on_alert
 
     def listen(wait_seconds=5, max_seconds=10):
         heard = voice_handler.listen_text(wait_seconds=wait_seconds, max_seconds=max_seconds)
@@ -180,7 +185,7 @@ def run_voice(agent):
 
     while True:
         while not due.empty():
-            speak(f"Reminder, {agent.title}: {due.get()}")
+            speak(due.get())
 
         if awake and timeout and time.time() - last_active > timeout:
             awake = False
@@ -250,7 +255,12 @@ def main():
             # "restart yourself" comes back here with config.json read again
             agent = Agent(load_config())
             log.info("KOVA started in %s mode", "text" if args.text else "voice")
-            result = run_text(agent) if args.text else run_voice(agent)
+            if agent.config.get("ALERTS_ON"):
+                alerts.start(agent.config)
+            try:
+                result = run_text(agent) if args.text else run_voice(agent)
+            finally:
+                alerts.stop()
             if not (result and result.restart):
                 break
             log.info("KOVA restarting")

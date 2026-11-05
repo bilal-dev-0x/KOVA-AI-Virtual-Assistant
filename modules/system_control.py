@@ -737,3 +737,111 @@ def restart_app(name, config=None):
     if opened.success:
         return Result(True, f"Restarted {key}")
     return opened
+
+
+# ---------- terminal windows: closed one by one, never the one Max runs in ----------
+# "terminal" opens powershell.exe, which is protected (Max may be running inside one),
+# so Max closes the classic console windows instead, leaving out its own.
+
+def _own_console():
+    if os.name != "nt":
+        return 0
+    import ctypes
+    return ctypes.windll.kernel32.GetConsoleWindow() or 0
+
+
+def console_windows():
+    """[(hwnd, title)] of visible console windows (PowerShell, Command Prompt), not Max's own."""
+    if os.name != "nt":
+        return []
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    own = _own_console()
+    found = []
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+
+    def visit(hwnd, _):
+        name = ctypes.create_unicode_buffer(64)
+        user32.GetClassNameW(hwnd, name, 64)
+        if name.value == "ConsoleWindowClass" and user32.IsWindowVisible(hwnd) and hwnd != own:
+            length = user32.GetWindowTextLengthW(hwnd)
+            title = ctypes.create_unicode_buffer(length + 1)
+            user32.GetWindowTextW(hwnd, title, length + 1)
+            found.append((hwnd, title.value))
+        return True
+
+    user32.EnumWindows(callback_type(visit), 0)
+    return found
+
+
+def close_terminals(wait_seconds=4):
+    """Click X on every terminal window except Max's own."""
+    windows = console_windows()
+    if not windows:
+        return Result(True, "No terminal windows are open, apart from the one I run in.")
+    hwnds = {hwnd for hwnd, _ in windows}
+    _post_close(hwnds)
+    deadline = time.time() + wait_seconds
+    while time.time() < deadline:
+        left = hwnds & {hwnd for hwnd, _ in console_windows()}
+        if not left:
+            break
+        time.sleep(0.4)
+    else:
+        left = hwnds & {hwnd for hwnd, _ in console_windows()}
+    closed = len(hwnds) - len(left)
+    log.info("Closed %s of %s terminal windows", closed, len(hwnds))
+    if left:
+        return Result(closed > 0, f"Closed {closed} terminal window{'s' if closed != 1 else ''}; "
+                                  f"{len(left)} is still busy with something.")
+    return Result(True, f"Closed {closed} terminal window{'s' if closed != 1 else ''}"
+                        + (", but not the one I run in." if _own_console() else "."))
+
+
+# ---------- folders said out loud: "D drive coding arc" -> D:\Coding Arc ----------
+
+SPOKEN_DRIVE = re.compile(r"^(?:the )?(?P<letter>[a-z])(?: drive|:)\s*(?P<rest>.*)$", re.IGNORECASE)
+
+
+def spoken_path(text):
+    """A real folder for what was said or saved, or None.
+
+    'D:\\Coding Arc' and 'D drive coding arc' both work: after the drive, each part is
+    matched against the folders that exist, forgiving small speech mistakes.
+    """
+    text = (text or "").strip().strip(".")
+    if not text:
+        return None
+    if re.match(r"^[a-z]:[\/]", text, re.IGNORECASE) or text.startswith("\\\\"):
+        return text if os.path.isdir(text) else None
+    match = SPOKEN_DRIVE.match(text)
+    if not match:
+        return None
+    path = f"{match['letter'].upper()}:\\"
+    if not os.path.isdir(path):
+        return None
+    words = re.sub(r"[\/]", " ", match["rest"]).split()
+    while words:
+        try:
+            folders = [d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]
+        except OSError:
+            return None
+        # The longest run of words that names a folder here: "coding arc" before "coding"
+        for size in range(len(words), 0, -1):
+            name = best_match(" ".join(words[:size]), folders, cutoff=0.75)
+            if name:
+                path = os.path.join(path, name)
+                words = words[size:]
+                break
+        else:
+            return None
+    return path
+
+
+def open_folder(path):
+    if not path or not os.path.isdir(path):
+        return Result(False, f"I can't find the folder {path}.")
+    os.startfile(path)
+    log.info("Opened folder %s", path)
+    return Result(True, f"Opening {path}")

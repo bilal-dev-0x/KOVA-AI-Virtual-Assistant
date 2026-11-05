@@ -57,8 +57,9 @@ class Tool:
                 return self.confirm_text.format(**args)
             except (KeyError, IndexError):
                 pass
-        shown = ", ".join(f"{k}={v!r}" for k, v in args.items())
-        return f"{self.name.replace('_', ' ')}" + (f" ({shown})" if shown else "")
+        # Read aloud in approval questions: "set reminder: stretch, 10", not "(message='stretch')"
+        shown = ", ".join(str(v) for v in args.values() if v not in ("", None))
+        return f"{self.name.replace('_', ' ')}" + (f": {shown}" if shown else "")
 
     def validate(self, args):
         """Check arguments that came from the AI. Returns (clean_args, error)."""

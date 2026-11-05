@@ -5,7 +5,8 @@ from typing import Callable
 
 import brain
 import music_library  # noqa: F401  (tests reach the library through here)
-from modules import agent_loop, media_keys, memory_engine, reminders, system_control, tool_registry, tools  # noqa: F401
+from modules import (agent_loop, alerts, media_keys, memory_engine, reminders, routines, system_control,  # noqa: F401
+                     tool_registry, tools)
 from modules.actions import ActionRunner
 from modules.fuzzy import best_match
 from modules.logger import get_logger
@@ -51,10 +52,15 @@ REMEMBER_RAW = re.compile(r"\b(remember|don'?t forget|keep in mind)(\s+that)?[\s
                           re.IGNORECASE | re.DOTALL)
 # Commands whose "it"/"that" is not the last app ("forget that" = the last fact)
 OWN_PRONOUNS = {"forget"}
+# Their replies hold your facts, so the agent only hears that one ran
+MEMORY_COMMANDS = {"remember", "remember to", "list memories", "forget all", "forget", "recall"}
+# Memories added to an agent request: at most this many, and only good matches
+MEMORY_NOTE_FACTS = 3
+MEMORY_NOTE_SCORE = 0.6
 
 # Requests with several parts or conditions go to the agent when Gemini is set up:
 # a local regex would only see one part ("close whatever uses ram except vs code" is not "ram")
-JOINERS = re.compile(r"\b(and|then|so|after|before|except|but|if|unless|whatever|whichever|because|while|instead)\b")
+JOINERS = re.compile(r"\b(and|then|so(?! (slow|bad|hot|loud|quiet|laggy|much|many|long|fast|high|low|full|busy)\b)|after|before|except|but|if|unless|whatever|whichever|because|while|instead)\b")
 MAX_LOCAL_WORDS = 8
 # "how is my cpu and ram" has an "and" but only asks for the system status
 STATUS_ONLY = re.compile(
@@ -70,14 +76,28 @@ NEVER_MIND = re.compile(r"^(no|nope|nah|none|nothing|cancel|stop|never ?mind|nev
 # is replaced, so "the opposite of" in a longer request is left alone.
 MISHEARD = {"opposite": "pause it", "positive": "pause it", "a pause it": "pause it", "pozit": "pause it",
             "pass it": "pause it", "boss it": "pause it", "paws it": "pause it", "pause pause it": "pause it"}
+MISHEARD.update({"are alert song": "are alerts on", "are alerts song": "are alerts on", "rms on": "are alerts on",
+                 "alerts song": "are alerts on", "do them": "undo", "undo them": "undo"})
 MISHEARD_START = [(re.compile(r"^forgot\b"), "forget")]
+# Inside a sentence: "switch to ip performance", "what proteins do i have"
+MISHEARD_WORDS = [(re.compile(r"\b(ip|hi|hai) performance\b"), "high performance"),
+                  (re.compile(r"\b(proteins|routings)\b"), "routines")]
 
 
 def fix_misheard(text):
     text = MISHEARD.get(text, text)
-    for pattern, said in MISHEARD_START:
+    for pattern, said in MISHEARD_START + MISHEARD_WORDS:
         text = pattern.sub(said, text)
     return text
+
+
+# Power plans as people say them -> the names system_info.PLANS knows
+PLAN_NAMES = {"high performance": "high performance", "performance": "high performance",
+              "balanced": "balanced", "normal": "balanced",
+              "power saver": "power saver", "power saving": "power saver", "battery saver": "power saver",
+              "battery saving": "power saver", "saver": "power saver", "ultimate performance": "ultimate performance"}
+_PLANS = "|".join(sorted(PLAN_NAMES, key=len, reverse=True))
+_PERIOD = "today|yesterday|this week|last week|last 7 days"
 
 
 def needs_agent(text):
@@ -119,8 +139,11 @@ def normalize(text, wake_words=("kova",)):
 
 
 def _collapse_repeat(text):
-    """'pause the song pause the song' -> 'pause the song'"""
+    """'pause the song pause the song' -> 'pause the song'; 'pause the song pause' too."""
     words = text.split()
+    if len(words) >= 3 and words[-1] == words[0]:
+        words = words[:-1]
+        text = " ".join(words)
     for size in range(1, len(words) // 2 + 1):
         if len(words) % size == 0 and words == words[:size] * (len(words) // size):
             return " ".join(words[:size])
@@ -288,6 +311,9 @@ class Agent:
         tools.setup(self.config, self.provider)
         tool_registry.load_plugins_once()
         self.runner = ActionRunner()
+        # Routines run their steps through the same runner and ask through the same confirm
+        tools._context["runner"] = self.runner
+        tools._context["confirm"] = lambda question: self.confirm(question)
         self.session = None
         self.recent_local = []  # local commands since the last agent request, for context
         self.raw_text = ""      # what was said, before normalize(): memory keeps its capitals and paths
@@ -315,7 +341,8 @@ class Agent:
                     self.help, help="help"),
             Command("greet", r"^(hello|hi|hey|good (morning|afternoon|evening))( there)?$",
                     self.greet),
-            Command("undo", r"^(undo|undo (that|it|the last (thing|action|one))|take (that|it) back|reverse that)$",
+            Command("undo", r"^(undo|undo (that|it|this|them|the last (thing|action|one))|take (that|it) back|reverse that)$"
+                            r"|^undo (the |my )?(alerts?|power plan|music|song|voice|volume|reminder|memory|change)$",
                     lambda arg: self.runner.undo_last(), help="undo"),
             Command("remember", r"^(remember|dont forget|keep in mind)( that)? (?!to )(?P<arg>.+)$",
                     self.remember, help="remember <something about you>"),
@@ -386,6 +413,9 @@ class Agent:
                                   r"( (of|in|for))?( (?P<arg>.+))?$|^open (?P<arg2>.+?) in a new window$",
                     lambda arg: tool("new_window", name=arg), help="new window of <app>",
                     ask_text="New window of what?"),
+            Command("open folder", r"^(open|show)( me)?( my| the)? (?P<arg>.+? (folder|directory))$"
+                                   r"|^open (?P<arg2>[a-z] drive\b.*)$",
+                    self.open_folder, help="open my project folder / open D drive coding arc"),
             Command("open", r"^(open|launch|start)( (?P<arg>.+))?$",
                     lambda arg: tool("open_app", name=arg), help="open <app or website>", ask_text="Open what?"),
             # "force close calculator", "close it anyway", "force it" after a close failed
@@ -401,6 +431,47 @@ class Agent:
                     lambda arg: tool("restart_app", name=arg), level=CONTROLLED, help="restart <app>",
                     confirm_text="Restart {arg}?", ask_text="Restart what?",
                     prepare=lambda arg: system_control.check_app(arg)),
+            # ---------- Day 3: system intelligence, alerts, routines, activity ----------
+            Command("health report", r"^(how is|hows|how s|how are)( my| the)? (pc|computer|laptop|system|machine)"
+                                     r"( doing| running| looking| health| holding up)?$"
+                                     r"|\b(health report|health check|pc health|computer health|laptop health)\b"
+                                     r"|^(health|check up|checkup)$|\bwhy is (my |the )?(pc|computer|laptop) (so )?slow\b",
+                    lambda arg: tool("health_report"), help="how's my PC (health report)"),
+            Command("uptime", r"\buptime\b|^how long\b.*\b(pc|computer|laptop|system|windows)\b.*\b(on|running|up)$|\bwhen did i (start|turn on|boot) (my |the )?(pc|computer|laptop)\b",
+                    lambda arg: tool("uptime"), help="uptime"),
+            Command("startup apps", r"\b(startup|start up) (apps|programs|items|list)\b"
+                                    r"|\bwhat (starts|runs|opens|launches|loads) (with|when|on) windows\b"
+                                    r"|\bwhat (starts|runs|opens) (at|on) (startup|start up|boot)\b",
+                    lambda arg: tool("startup_apps"), help="what starts with Windows"),
+            Command("set power plan", rf"^(switch|change|set|put|go)( it| my pc| the pc| my laptop| the power plan| power plan"
+                                      rf"| the power mode| power mode)?( to| on| into)? (?P<arg>{_PLANS})( mode| plan| power plan)?$"
+                                      rf"|^(?P<arg2>{_PLANS}) (mode|plan|power plan)( please| now)?$",
+                    lambda arg: tool("set_power_plan", plan=arg), level=CONTROLLED,
+                    help="switch to high performance / balanced / power saver",
+                    confirm_text="Switch to the {arg} power plan?",
+                    prepare=lambda arg: (PLAN_NAMES.get(arg, arg), None)),
+            Command("power plan", r"\b(what|which)( is)?( my| the)? (power plan|power mode)\b|^(power plan|power mode)$"
+                                  r"|\b(my|current) (power plan|power mode)\b",
+                    lambda arg: tool("power_plan"), help="which power plan am I on"),
+            Command("alerts", r"^(turn|switch|set) (?P<arg>on|off) (the |my |pc |system )?alerts$"
+                              r"|^(turn|switch) (the |my )?alerts (?P<arg2>on|off)$"
+                              r"|^(?P<arg3>enable|disable|start|stop) (the |my |pc )?alerts$",
+                    self.alerts, help="turn on / off alerts"),
+            Command("alerts status", r"^(are|is) (the |my )?alerts (on|off|enabled|running|working)$",
+                    lambda arg: Result(True, f"Alerts are {'on' if alerts.running() else 'off'}.")),
+            Command("list routines", r"^(what|which) routines (do i have|are there|have i got)$"
+                                     r"|^(list|show|tell me)( me)?( all)?( my| the)? routines$|^(my )?routines$",
+                    lambda arg: tool("list_routines"), help="what routines do I have"),
+            Command("activity apps", rf"^(which|what) apps (did i|have i|i did|i have) (open|opened|use|used)( the)? most( (?P<arg>{_PERIOD}))?$"
+                                     rf"|^(what|which) (apps|programs) did i (open|use)( (?P<arg2>{_PERIOD}))?$",
+                    lambda arg: tool("activity_summary", period=arg or "this week", focus="apps"),
+                    help="which apps did I open most this week"),
+            Command("activity songs", rf"^what (songs|music) (did|have) (i|you) (play|played|listen to|listened to)"
+                                      rf"( (?P<arg>{_PERIOD}))?$",
+                    lambda arg: tool("activity_summary", period=arg or "today", focus="songs")),
+            Command("activity", rf"^what (did|have) (i|we|you) (do|done|did)( for me)?( (?P<arg>{_PERIOD}))?$"
+                                rf"|^what (did|have) you done for me( (?P<arg2>{_PERIOD}))?$",
+                    lambda arg: tool("activity_summary", period=arg or "today"), help="what did I do yesterday"),
             Command("system status", r"^(status|health|report)$|\b(system (status|report|health)|(pc|computer|laptop) (status|health))\b"
                                      r"|^check( my| the)? (system|pc|computer|laptop)$",
                     lambda arg: tool("system_status"), help="system status"),
@@ -429,7 +500,10 @@ class Agent:
             Command("gpu", r"\b(gpu|graphics card|video card)\b",
                     lambda arg: tool("gpu_usage"), help="gpu usage"),
             # Last, so "what is my cpu usage" and "whats my battery" stay system commands
-            Command("recall", r"^(what|where|which|who|when)( is| are|s| was| were)? my (?P<arg>.+)$"
+            Command("recall", r"^(?P<arg4>((what|where|which|who|when|how)( kind of| sort of)?( \w+)? |\w+ )?"
+                              r"(do|did|was|am|have) i (keep|put|like|love|prefer|enjoy|listen to|born|live|work|study"
+                              r"|learn|use|play|code)\b.*)$"
+                              r"|^(what|where|which|who|when)( is| are|s| was| were)? my (?P<arg>.+)$"
                               r"|^do you (remember|know) (what|where|which|who|when) my (?P<arg2>.+?)( is| are)?$"
                               r"|^do you (remember|know) my (?P<arg3>.+)$",
                     self.recall, help="what's my <something>"),
@@ -472,7 +546,7 @@ class Agent:
             m = command.regex.search(text)
             if m:
                 groups = m.groupdict()
-                arg = clean_arg(groups.get("arg") or groups.get("arg2") or groups.get("arg3"))
+                arg = clean_arg(groups.get("arg") or groups.get("arg2") or groups.get("arg3") or groups.get("arg4"))
                 return command, arg or None
         return None, None
 
@@ -483,6 +557,11 @@ class Agent:
 
         if not text:
             return Result(True, f"Yes {self.title}?")
+
+        # "coding mode": your own routine phrases come before every built-in command
+        routine = routines.find(routines.cached()[0], text)
+        if routine:
+            return self.run_routine(routine, text)
 
         # Hybrid routing: simple commands stay local (instant, free, offline),
         # requests with several parts go to the agent
@@ -531,6 +610,10 @@ class Agent:
                 return problem
 
         window = None
+        if command.name == "close" and arg == "terminal":
+            if not self.confirm("Close the terminal windows? Not the one I'm running in."):
+                return Result(False, "Okay, cancelled.")
+            return self._tool("close_terminals")
         if command.name == "close" and self.closing_title:
             return self._close_titled(*self.closing_title)
         if command.name == "close":
@@ -554,8 +637,12 @@ class Agent:
 
         log.info("Command %s(%s) -> %s", command.name, arg or "", "ok" if result.success else "failed")
         if self.provider and command.name not in ("exit", "sleep", "help", "greet"):
-            # So the agent understands "actually close it" after a local "open discord"
-            self.recent_local = (self.recent_local + [f"'{text}' -> {result.message}"])[-5:]
+            # So the agent understands "actually close it" after a local "open discord".
+            # Memory commands say only what kind they were: the facts themselves reach the
+            # brain only through the matched note in _run_agent
+            said = f"(a memory command: {command.name})" if command.name in MEMORY_COMMANDS \
+                else f"'{text}' -> {result.message}"
+            self.recent_local = (self.recent_local + [said])[-5:]
         return result
 
     def _fallback(self, raw_text, text):
@@ -587,9 +674,12 @@ class Agent:
             self.session = self.provider.session(agent_loop.system_prompt(self.config), tool_registry.all_tools())
 
         message = raw_text
+        known = self._known_facts(raw_text)
+        if known:
+            message = f"(Known about the user, in their words: {known})\n" + message
         if self.recent_local:
             message = ("(Commands the user ran without you since your last reply: "
-                       + "; ".join(self.recent_local) + ")\n" + raw_text)
+                       + "; ".join(self.recent_local) + ")\n" + message)
             self.recent_local = []
 
         print("Thinking.....")
@@ -603,11 +693,25 @@ class Agent:
             return None
         return clean_arg(text) or None
 
+    def _known_facts(self, request):
+        """The few memories that match this request, for the brain; "" when none match,
+        so most requests carry nothing extra."""
+        if not self.config.get("MEMORY_IN_AI_REQUESTS", True):
+            return ""
+        try:
+            found = memory_engine.get_memory().related(request, limit=MEMORY_NOTE_FACTS, min_score=MEMORY_NOTE_SCORE)
+        except Exception:
+            log.exception("Memory lookup for an agent request failed")
+            return ""
+        return "; ".join(fact.text for _, fact in found)
+
     # ---------- handlers ----------
 
     def _prepare_close(self, arg):
         """Like check_app, but "close lofi music" can also mean the window showing it."""
         self.closing_title = None
+        if system_control._resolve_app(arg)[0] == "terminal":
+            return "terminal", None  # closed window by window in handle(), never Max's own
         key, problem = system_control.check_app(arg, must_be_running=True)
         if problem and (problem.message.startswith("I don't know") or " is a website" in problem.message):
             found = system_control.window_titled(arg)
@@ -616,6 +720,38 @@ class Agent:
                 self.closing_title = found
                 return found[0], None
         return key, problem
+
+    def open_folder(self, said):
+        """'project folder' -> the folder your memory says; 'd drive coding arc' -> D:\\Coding Arc."""
+        path = system_control.spoken_path(said)
+        if path is None:
+            found = memory_engine.get_memory().find(said, limit=1)
+            value = memory_engine.value_of(found[0][1].text) if found else None
+            path = system_control.spoken_path(value) if value else None
+            if found and path is None:
+                return Result(False, f"I remember {memory_engine.as_you(found[0][1].text)}, "
+                                     "but I can't find that folder on this PC.")
+            if not found:
+                if self.provider:
+                    return self._ask_agent(self.raw_text)
+                return Result(False, f"I don't know where your {said} is. "
+                                     f"Say remember my {said} is, then where it is.")
+            self.last_fact = found[0][1]
+        return self._tool("open_folder", path=path)
+
+    def run_routine(self, routine, text=""):
+        """One question for the whole routine (if any step needs one), then every step in order."""
+        if routines.needs_approval(routine, self.runner.permissions):
+            if not self.confirm(f"Should I run {routine.name}: {routine.describe()}?"):
+                return Result(False, "Okay, I didn't run it.")
+        result = self._tool("run_routine", name=routine.name)
+        if self.provider:
+            self.recent_local = (self.recent_local + [f"'{text or routine.name}' -> {result.message}"])[-5:]
+        return result
+
+    def alerts(self, word):
+        on = word in ("on", "enable", "start")
+        return self._tool("set_alerts", on=on)
 
     def play(self, query):
         result = self._tool("play_music", query=query)
@@ -700,6 +836,9 @@ class Agent:
         found = REMEMBER_RAW.search(self.raw_text)
         fact = (found["fact"] if found else arg).strip()
         fact = re.sub(r"[\s,]+please[.!]*$", "", fact, flags=re.IGNORECASE).strip(" .!")
+        if not memory_engine.keywords(fact):
+            # "remember my" cut off by the mic saved a fact that just said "My"
+            return Result(False, "I didn't catch what to remember. Say remember, then the whole thing.")
         result = self._tool("remember", fact=fact)
         if result.success:
             self.last_fact = memory_engine.get_memory().all()[0]
@@ -749,6 +888,14 @@ class Agent:
             if again is not None and again.name == "forget" and again_arg:
                 answer = again_arg  # "forget my project folder" said as the answer
             return self.forget(answer, asked=True)
+
+        number = re.match(r"^(memory |number |memory number |fact )?(?P<id>\d+)$", what)
+        if number:
+            # "forget memory 15": the numbers "what do you know about me" prints
+            fact = store.get(int(number["id"]))
+            if fact is None:
+                return Result(False, f"I don't have a memory number {number['id']}.")
+            return self._forget_facts([fact])
 
         facts, missing = self._find_facts(what)
         if not facts:
@@ -822,7 +969,8 @@ class Agent:
 
     def help(self, arg):
         detail = "\n".join(f"  - {c.help}" for c in self.commands if c.help)
-        message = ("I can open, close and restart apps, play music, control the volume, check your system, "
+        message = ("I can open, close and restart apps, play music, control the volume, check your PC's health, "
+                   "remember things about you, run your routines, warn you with alerts, tell you what I did today, "
                    "set reminders, undo my last action, and tell the time and date.")
         if self.provider:
             message += " For anything bigger, just ask in your own words and I'll plan it with Gemini."
