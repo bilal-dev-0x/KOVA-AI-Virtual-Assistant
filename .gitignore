@@ -20,3 +20,7 @@ logs/
 .idea/
 .kilo/
 .pytest_cache/
+
+# Local memory and routines
+data/
+routines.json

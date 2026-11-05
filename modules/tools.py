@@ -46,7 +46,10 @@ def open_app(name: str):
 @tool("Close a running app gently, like clicking X, so it can still ask to save work. "
       "Reports how much RAM was freed. Give window to close only one of its windows (see list_windows).",
       params={"name": "App name", "window": "Part of one window's title; leave out to close the whole app"},
-      level=CONTROLLED, confirm_text="close {name}", check=_check_closable)
+      level=CONTROLLED, check=_check_closable,
+      # "Should I close the chrome window Softly?" names the window, not just the app
+      confirm_text=lambda a: (f"close the {a['name']} window {system_control.spoken_title(a['window'])}"
+                              if a.get("window") else f"close {a['name']}"))
 def close_app(name: str, window: str = ""):
     if window:
         return system_control.close_app(name, window=window)
@@ -61,6 +64,21 @@ def close_app(name: str, window: str = ""):
         result.undo = lambda: system_control.open_target(name, _context["config"])
         result.undo_text = f"open {name} again"
     return result
+
+
+def _check_tab(name, title):
+    if not system_control.is_browser(name):
+        return Result(False, f"{name} isn't a browser I know, so I can't close its tabs.")
+    return None
+
+
+@tool("Close one browser tab, e.g. a YouTube video, leaving the window's other tabs open. Only the tab "
+      "showing in a window can be closed: give part of that window's title (see list_windows).",
+      params={"name": "Browser name, e.g. chrome", "title": "Part of the window title, e.g. 'Softly'"},
+      level=CONTROLLED, check=_check_tab,
+      confirm_text=lambda a: f"close the {system_control.spoken_title(a['title'])} tab in {a['name']}")
+def close_tab(name: str, title: str):
+    return system_control.close_tab(name, title)
 
 
 @tool("The titles of an app's open windows, e.g. each Chrome window.", params={"name": "App name"})
@@ -398,3 +416,112 @@ def cancel_reminder(reminder_id: int = 0):
     if not count:
         return Result(False, "There was no such reminder." if reminder_id else "You have no reminders.")
     return Result(True, f"Cancelled {count} reminder{'s' if count > 1 else ''}.")
+
+
+# ---------- memory ----------
+
+def _memory():
+    from modules import memory_engine
+    return memory_engine
+
+
+def _check_fact(fact):
+    engine = _memory()
+    if engine.looks_secret(fact):
+        return Result(False, engine.SECRET_MESSAGE)
+    if not fact.strip(" ."):
+        return Result(False, "There's nothing to remember.")
+    return None
+
+
+def _check_fact_id(fact_id):
+    if _memory().get_memory().get(fact_id) is None:
+        return Result(False, f"I don't have a memory number {fact_id}.")
+    return None
+
+
+@tool("Save a lasting fact or preference about the user, in their words, e.g. 'I like lo-fi when coding'. "
+      "Use it when the user asks you to remember something, or states a lasting preference. "
+      "Never for passwords, PINs, keys or card numbers.",
+      params={"fact": "The fact, in the user's own words"},
+      level=CONTROLLED, confirm_text="save this to my memory: {fact}", check=_check_fact)
+def remember(fact: str):
+    engine = _memory()
+    store = engine.get_memory()
+    try:
+        saved, replaced = store.remember(fact)
+    except ValueError as e:  # SecretError included
+        return Result(False, str(e))
+    said = engine.as_you(saved.text)
+    if replaced and replaced.text != saved.text:
+        # "Updated. Your project folder is E:\Work now, not D:\Code."
+        old = engine.value_of(replaced.text) or engine.as_you(replaced.text)
+        result = Result(True, f"Updated. {_capital(said)} now, not {old}.")
+        result.undo = lambda: store.restore(replaced) and None or Result(
+            True, f"Okay, {engine.as_you(replaced.text)} again.")
+    elif replaced:
+        result = Result(True, f"I already knew that {said}.")
+    else:
+        result = Result(True, f"Got it. I'll remember that {said}.")
+        result.undo = lambda: store.forget(saved.id) and None or Result(True, f"Okay, I forgot that {said}.")
+    result.undo_text = "forget what I just saved"
+    return result
+
+
+@tool("Look up what the user told you before about something, e.g. 'project folder'. "
+      "Returns the matching memories with their numbers.",
+      params={"query": "What to look up"})
+def recall(query: str):
+    engine = _memory()
+    store = engine.get_memory()
+    found = [fact for _, fact in store.find(query)]
+    if not found:
+        return Result(False, f"I don't have anything saved about {query}.")
+    store.used(found)
+    said = [engine.as_you(f.text) for f in found]
+    message = _capital(said[0]) + "." if len(said) == 1 else "Here's what I know: " + "; ".join(said) + "."
+    return Result(True, message, detail="\n".join(f"  #{f.id}: {f.text}" for f in found))
+
+
+@tool("List everything the user asked you to remember, with memory numbers.")
+def list_memories():
+    engine = _memory()
+    facts = engine.get_memory().all()
+    if not facts:
+        return Result(True, "I don't know anything about you yet. Say remember, then something about yourself.")
+    said = [engine.as_you(f.text) for f in facts]
+    shown = "; ".join(said[:5])
+    more = f"; and {len(facts) - 5} more" if len(facts) > 5 else ""
+    count = f"{len(facts)} thing{'s' if len(facts) > 1 else ''}"
+    return Result(True, f"I remember {count} about you: {shown}{more}.",
+                  detail="\n".join(f"  #{f.id}: {f.text}" for f in facts))
+
+
+@tool("Delete one memory by its number from recall or list_memories.",
+      params={"fact_id": "Memory number"},
+      level=CONTROLLED, confirm_text="forget memory number {fact_id}", check=_check_fact_id)
+def forget_memory(fact_id: int):
+    engine = _memory()
+    store = engine.get_memory()
+    fact = store.forget(fact_id)
+    if fact is None:
+        return Result(False, f"I don't have a memory number {fact_id}.")
+    said = engine.as_you(fact.text)
+    result = Result(True, f"Okay, I forgot that {said}.")
+    result.undo = lambda: store.restore(fact) and None or Result(True, f"Okay, I remember again that {said}.")
+    result.undo_text = "remember that again"
+    return result
+
+
+@tool("Delete every memory about the user. Only when they clearly ask to forget everything.",
+      level=CRITICAL, confirm_text="forget everything I know about you. This can't be undone")
+def forget_all_memories():
+    count = _memory().get_memory().forget_all()
+    if not count:
+        return Result(True, "There was nothing to forget.")
+    things = "the one thing" if count == 1 else f"all {count} things"
+    return Result(True, f"Done. I forgot {things} I knew about you.")
+
+
+def _capital(text):
+    return text[:1].upper() + text[1:]

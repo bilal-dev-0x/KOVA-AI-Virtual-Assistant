@@ -105,9 +105,9 @@ def test_gpu_report_adds_the_temperature(monkeypatch):
 
 # ---------- 6. the song, and repeated phrases ----------
 
-@pytest.mark.parametrize("text", ["close the song now", "stop the music", "pause the song pause the song",
-                                  "end this video"])
-def test_closing_the_song_pauses_it(text):
+# "close the song now" closes its YouTube tab since the Day 3 voice test (test_day3_fixes.py)
+@pytest.mark.parametrize("text", ["stop the music", "pause the song pause the song", "end this video"])
+def test_stopping_the_song_pauses_it(text):
     agent = Agent()
     assert agent.match(agent.normalize(text))[0].name == "play pause"
 

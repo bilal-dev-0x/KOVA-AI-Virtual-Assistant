@@ -18,7 +18,8 @@ YES_WORDS = ("yes", "yeah", "yep", "yup", "sure", "ok", "okay", "alright", "all 
 # Any of these makes the answer a no, even next to a yes word ("ok, don't close it")
 NO_WORDS = ("no", "nope", "nah", "not", "dont", "never", "cancel", "stop", "wait", "negative", "leave it")
 # Repeating the action back ("close it" to "Should I close calculator?") is also a yes
-ACTION_WORDS = ("open", "close", "restart", "end", "set", "play", "mute")
+ACTION_WORDS = ("open", "close", "restart", "end", "set", "play", "mute", "forget", "delete", "remove",
+                "remember", "save")
 
 # Said while Max waits for a slow brain answer
 CANCEL = re.compile(r"\b(cancel|stop|never ?mind|forget (it|that)|leave it)\b")

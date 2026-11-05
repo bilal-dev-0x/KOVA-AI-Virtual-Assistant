@@ -41,7 +41,12 @@ def isolated_files(monkeypatch, tmp_path):
     from modules import tools, voice_handler
     monkeypatch.setattr(tools, "CONFIG_FILE", tmp_path / "config.json")
     monkeypatch.setattr(voice_handler, "_gender", voice_handler._gender)
+    from modules import memory_engine
+    monkeypatch.setattr(memory_engine, "DB_FILE", tmp_path / "memory.db")
     yield
+    if memory_engine._memory is not None:
+        memory_engine._memory.close()
+        memory_engine._memory = None
     reminders.cancel()
 
 

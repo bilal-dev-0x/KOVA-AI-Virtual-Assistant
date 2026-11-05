@@ -334,10 +334,19 @@ def app_windows(proc_names):
         user32.EnumChildWindows(frame, callback_type(check), 0)
         return bool(found)
 
+    def cloaked(hwnd):
+        # A closed Store app (Calculator) keeps its frame "visible" but cloaked: hidden from
+        # the screen and taskbar. Counting it made Max say "calculator is still open".
+        state = wintypes.DWORD()
+        DWMWA_CLOAKED = 14
+        failed = ctypes.windll.dwmapi.DwmGetWindowAttribute(
+            hwnd, DWMWA_CLOAKED, ctypes.byref(state), ctypes.sizeof(state))
+        return not failed and state.value != 0
+
     windows = []
     def visit(hwnd, _):
         length = user32.GetWindowTextLengthW(hwnd)
-        if user32.IsWindowVisible(hwnd) and length:
+        if user32.IsWindowVisible(hwnd) and length and not cloaked(hwnd):
             name = owner(hwnd)
             if name in wanted or (name == "applicationframehost.exe" and hosts_wanted_app(hwnd)):
                 title = ctypes.create_unicode_buffer(length + 1)
@@ -361,6 +370,131 @@ def short_title(title):
     if " - " in title:
         title = title.rsplit(" - ", 1)[0]
     return title[:60].strip()
+
+
+SITE_SUFFIX = re.compile(r" [-|] (YouTube|YouTube Music|Spotify|Netflix|Gmail|Google Search|Twitch)$", re.IGNORECASE)
+
+
+def spoken_title(title):
+    """'(30) Excuses (Official Video) | AP Dhillon | Gurinder Gill - YouTube - Google Chrome' -> 'Excuses'.
+    What a person would call the page out loud."""
+    title = short_title(title)
+    title = re.sub(r"^\(\d+\+?\)\s*", "", title)       # "(30) " unread notifications
+    title = SITE_SUFFIX.sub("", title)
+    title = title.split(" | ")[0]                     # "Song | Artist | Label"
+    plain = re.sub(r"\s*[(\[][^)\]]*[)\]]", "", title).strip(" -|")  # "(Official Video)", "[HD]"
+    said = (plain or title).strip(" -|")
+    # "SOFTLY KARAN AUJLA" in capitals can be spelled out letter by letter
+    return said.title() if said.isupper() else said
+
+
+# ---------- a window by what it shows: "close lofi music", "close softly by karan aujla" ----------
+
+# Words that describe the window rather than name it
+TITLE_FILLER = {"the", "a", "an", "of", "by", "on", "in", "from", "my", "this", "that", "music", "song", "songs",
+                "video", "videos", "tab", "tabs", "window", "page", "playing", "one", "called", "named", "with"}
+# A browser window's title is its visible tab, so Max closes that tab, not the whole window
+BROWSER_PROCESSES = {"chrome.exe", "brave.exe", "msedge.exe", "firefox.exe", "opera.exe"}
+
+
+def title_words(text):
+    return [w for w in re.findall(r"[a-z0-9]+", text.lower()) if w not in TITLE_FILLER]
+
+
+def title_has(title, words):
+    """Every word is in the title: 'lofi' matches 'Lo-Fi Beats', 'aujla' matches 'Karan Aujla'."""
+    plain = set(re.findall(r"[a-z0-9]+", title.lower()))
+    joined = re.sub(r"[^a-z0-9]", "", title.lower())
+    return bool(words) and all(w in plain or (len(w) >= 3 and w in joined) for w in words)
+
+
+def window_titled(query):
+    """The open window that shows query: (app_key, title), or None.
+
+    Only apps in apps.json with a process name are searched, so Max can close what it finds.
+    """
+    words = title_words(query)
+    if not words:
+        return None
+    running = _running_names()
+    for key, entry in load_apps().get("apps", {}).items():
+        procs = entry.get("process") or []
+        if not procs or not running & {p.lower() for p in procs}:
+            continue
+        for _, title in app_windows(procs):
+            if title_has(title, words):
+                return key, title
+    return None
+
+
+def is_browser(name):
+    _, entry = _resolve_app(name)
+    return bool(entry) and any(p.lower() in BROWSER_PROCESSES for p in entry.get("process", []))
+
+
+def _bring_to_front(hwnd, wait_seconds=1.5):
+    """True once hwnd is the foreground window. Windows only lets a background program do this
+    right after a key press, so Max taps Alt first."""
+    import ctypes
+    user32 = ctypes.windll.user32
+    if user32.IsIconic(hwnd):
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+    user32.keybd_event(0x12, 0, 0, 0)  # Alt down
+    user32.keybd_event(0x12, 0, 2, 0)  # Alt up
+    user32.SetForegroundWindow(hwnd)
+    deadline = time.time() + wait_seconds
+    while time.time() < deadline:
+        if user32.GetForegroundWindow() == hwnd:
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def _press_ctrl_w():
+    import ctypes
+    user32 = ctypes.windll.user32
+    user32.keybd_event(0x11, 0, 0, 0)  # Ctrl down
+    user32.keybd_event(0x57, 0, 0, 0)  # W
+    user32.keybd_event(0x57, 0, 2, 0)
+    user32.keybd_event(0x11, 0, 2, 0)  # Ctrl up
+
+
+def _window_title(hwnd):
+    import ctypes
+    user32 = ctypes.windll.user32
+    if not user32.IsWindow(hwnd):
+        return None
+    length = user32.GetWindowTextLengthW(hwnd)
+    buffer = ctypes.create_unicode_buffer(length + 1)
+    user32.GetWindowTextW(hwnd, buffer, length + 1)
+    return buffer.value
+
+
+def close_tab(name, title, wait_seconds=3):
+    """Close the browser tab whose title contains title (it must be the tab showing in its window).
+
+    Brings that window to the front and presses Ctrl+W, so the window's other tabs stay open.
+    Nothing is pressed unless that exact window is in front.
+    """
+    key, entry = _resolve_app(name)
+    if key is None or not entry.get("process"):
+        return Result(False, f"I don't know a browser called {name}.")
+    shown = spoken_title(title)
+    matches = [(hwnd, t) for hwnd, t in app_windows(entry["process"]) if title.lower() in t.lower()]
+    if not matches:
+        return Result(False, f"I can't find the {shown} tab in {key} any more.")
+    hwnd, full_title = matches[0]
+    if not _bring_to_front(hwnd):
+        return Result(False, f"Windows didn't let me bring {key} to the front, so I didn't close anything. "
+                             f"You can close the {shown} tab yourself.")
+    _press_ctrl_w()
+    deadline = time.time() + wait_seconds
+    while time.time() < deadline:
+        if _window_title(hwnd) != full_title:
+            log.info("Closed %s tab %s", key, shown)
+            return Result(True, f"Closed the {shown} tab in {key}")
+        time.sleep(0.3)
+    return Result(False, f"The {shown} tab in {key} is still open.")
 
 
 def close_app(name, window="", wait_seconds=5):
