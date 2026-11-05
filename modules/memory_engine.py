@@ -22,6 +22,7 @@ SECRET_MESSAGE = "I don't store passwords, PINs, keys or card numbers."
 # Words that mean the fact is a secret, wherever they appear
 SECRET_WORDS = re.compile(
     r"\b(pass ?words?|passcodes?|passphrases?|pin (code|number)s?|(my|the|atm|sim|phone|card|bank) pin|"
+    r"pins? (is|are|was)|pins?(?= ?[:=])|"  # "my wifi pin is 4455", "door pin: 9921"
     r"otps?|one time (code|password)|cvv|cvc|"
     r"api ?keys?|secret (key|code)s?|private keys?|(access|auth|api|bearer|github|discord|bot) tokens?|"
     r"token is|seed phrase|recovery (phrase|code)s?|"
@@ -33,7 +34,8 @@ SECRET_WORDS = re.compile(
 SECRET_VALUES = [
     re.compile(r"\bAIza[0-9A-Za-z_\-]{20,}"),            # Google API key
     re.compile(r"\b(sk|pk|rk|ghp|gho|xox[abp])[-_][0-9A-Za-z_\-]{16,}"),  # common key prefixes
-    re.compile(r"(?<!\d)(\d[ \-]?){12,19}(?!\d)"),       # card, CNIC or account number
+    # card, CNIC or account number: 13+ digits, so a phone number with +92 (12 digits) is kept
+    re.compile(r"(?<!\d)(\d[ \-]?){13,19}(?!\d)"),
     re.compile(r"\b[0-9A-Za-z+/]{32,}={0,2}(?![0-9A-Za-z])"),  # long random-looking strings
 ]
 

@@ -480,6 +480,17 @@ def test_activity_tool_reads_the_action_log(monkeypatch, history):
     assert result.success and "chrome" in result.message
 
 
+@pytest.mark.parametrize("said", ["which apps did i open most this week", "what did i do this week",
+                                  "what songs did you play this week"])
+def test_this_week_is_not_the_last_app(monkeypatch, history, said):
+    # "this" starts the period, it isn't "it": the last app must not replace it
+    monkeypatch.setattr(actions, "ACTIONS_LOG", str(history))
+    max_, _ = agent()
+    max_.runner.last_target = "chrome"
+    result = max_.handle(said)
+    assert result.success and "Invalid" not in result.message
+
+
 @pytest.mark.parametrize("raw, name", [
     ("MicrosoftEdgeAutoLaunch_1F8C9CAA32C66112118302A9123F9587", "Microsoft Edge"),
     ("GoogleChromeAutoLaunch_D3402AF9D5146512D32811827D0FDCBD", "Google Chrome"),
