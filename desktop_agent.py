@@ -50,8 +50,9 @@ MEMORY_COMMAND = re.compile(r"^(remember|dont forget|keep in mind|forget)\b(?! t
 # The fact is taken from what was said, before normalize() lowercased it and dropped "D:\\"
 REMEMBER_RAW = re.compile(r"\b(remember|don'?t forget|keep in mind)(\s+that)?[\s,:]+(?P<fact>.+)$",
                           re.IGNORECASE | re.DOTALL)
-# Commands whose "it"/"that" is not the last app ("forget that" = the last fact)
-OWN_PRONOUNS = {"forget"}
+# Commands whose "it"/"that" is not the last app ("forget that" = the last fact,
+# "this week" is a period)
+OWN_PRONOUNS = {"forget", "activity", "activity apps", "activity songs"}
 # Their replies hold your facts, so the agent only hears that one ran
 MEMORY_COMMANDS = {"remember", "remember to", "list memories", "forget all", "forget", "recall"}
 # Memories added to an agent request: at most this many, and only good matches

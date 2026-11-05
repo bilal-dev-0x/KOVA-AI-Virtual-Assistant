@@ -90,6 +90,8 @@ def test_kind_of(text, kind):
     "my wifi pass word is cats",
     "my ATM pin is 4321",
     "my pin code is 1234",
+    "my wifi pin is 4455",
+    "the door pin: 9921",
     "the OTP was 552211",
     "my api key is abc",
     "my github token is xyz",
@@ -112,6 +114,7 @@ def test_secrets_are_refused_and_never_written(memory, text):
     "My project folder is D:\\Coding Arc\\GitHub Repos",
     "I pin my favourite tabs in Chrome",
     "My phone number is 0300 1234567",
+    "My phone number is +92 300 1234567",
     "I play with game tokens on weekends",
     "My birthday is 12 March 2001",
 ])
