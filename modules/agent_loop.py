@@ -29,7 +29,13 @@ def system_prompt(config):
         "Speech recognition can mishear words: if a request looks garbled, ask the user to repeat it "
         "instead of guessing an action. "
         "A message may start with a note about commands the user ran without you; use it to "
-        "understand words like 'it' or 'that'."
+        "understand words like 'it' or 'that'. "
+        "It may also include facts known about the user; use them when they help, and use the recall "
+        "tool to look up anything else the user told you before. "
+        "When the user states a lasting preference or fact about themselves (what they like, where "
+        "they keep things, what they do), save it with the remember tool in their words; they are "
+        "asked before it is saved. Never save passwords, PINs, keys or card numbers, and don't save "
+        "one-off requests."
     )
 
 

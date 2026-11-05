@@ -108,12 +108,16 @@ Example routines: *coding mode* (VS Code, terminal, lo-fi music, high performanc
 ## Checklist
 - [x] 1. Memory store + secrets guard
 - [x] 2. Remember / review / forget
-- [ ] 3. Recall by meaning (local, then embeddings if the quota allows)
-- [ ] 4. Memories in agent requests + auto-memory
-- [ ] 5. Health report, startup apps, power plans
-- [ ] 6. Alerts
-- [ ] 7. Routines
-- [ ] 8. Activity recall
+- [x] 3. Recall by meaning: offline only (stems, a synonym table, near spellings). Embeddings were left out:
+  the free key allows about 20 requests a day and the relay brain has none, so local matching is the default.
+- [x] 4. Memories in agent requests + auto-memory (`MEMORY_IN_AI_REQUESTS`, on by default; memory replies
+  no longer go into the "commands you ran" note)
+- [x] 5. Health report, uptime, startup apps (read only), power plans with undo. This PC has only the Balanced
+  plan, so the example "coding mode" has no power-plan step. To bring High performance back, run
+  `powercfg -duplicatescheme 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c` yourself, then add the step to routines.json.
+- [x] 6. Alerts (off by default; "turn on alerts")
+- [x] 7. Routines (`routines.json.example`; copy it to routines.json to make your own)
+- [x] 8. Activity recall
 - [x] Voice test of steps 1–2 → fixes → commit → push (5 Nov evening)
   - Pause / stop "it", "opposite" and "positive" heard for "pause it", "forgot" for "forget"
   - "how is my CPU and RAM" stays local despite the "and"
@@ -123,4 +127,12 @@ Example routines: *coding mode* (VS Code, terminal, lo-fi music, high performanc
   - Repeating the action ("forget that") is a yes; "ok bye" / "never mind" drops a question
   - Calculator no longer reported "still open" (cloaked window)
   - Natural voice gives up in 1.5 s when DNS fails, backing off 2 → 30 min (the real fix was the Wi-Fi DNS)
-- [ ] Voice test of steps 3–8 → fixes → commit → push
+- [x] Voice test of steps 3–8 → fixes → commit → push (6 Nov, 01:28–01:50)
+  - Recall questions answered locally: "where do I keep my code", "what music do I like", "when was I born"
+  - A related word alone is no longer a match ("where do I keep my food" didn't mean the project folder)
+  - "open my project folder" / "open D drive coding arc" opens the folder (new `open_folder` tool)
+  - "close terminal" closes terminal windows one by one, never the one Max runs in (`close_terminals`)
+  - "so slow" isn't a joiner; looser uptime and "which apps I did open most" phrasing
+  - Misheard: "IP performance", "are alert song", "RMS on", "proteins", "and do them"; "undo the alerts"
+  - "remember my" with nothing after it is refused; "forget memory 15" forgets by number
+  - Break time no longer toggles the music (the media key can't tell pause from play)

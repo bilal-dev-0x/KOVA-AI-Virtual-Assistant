@@ -43,7 +43,13 @@ def isolated_files(monkeypatch, tmp_path):
     monkeypatch.setattr(voice_handler, "_gender", voice_handler._gender)
     from modules import memory_engine
     monkeypatch.setattr(memory_engine, "DB_FILE", tmp_path / "memory.db")
+    # No test runs your routines.json or the example: routine tests write their own
+    from modules import alerts, routines
+    monkeypatch.setattr(routines, "ROUTINES_FILE", tmp_path / "routines.json")
+    monkeypatch.setattr(routines, "EXAMPLE_FILE", tmp_path / "routines.json.example")
+    routines._cache["key"] = None
     yield
+    alerts.stop()
     if memory_engine._memory is not None:
         memory_engine._memory.close()
         memory_engine._memory = None

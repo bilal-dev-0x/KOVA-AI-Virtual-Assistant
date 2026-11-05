@@ -1,0 +1,29 @@
+{
+  "routines": [
+    {
+      "name": "coding mode",
+      "phrases": ["coding mode", "start coding", "lets code", "time to code"],
+      "steps": [
+        {"tool": "open_app", "args": {"name": "vs code"}},
+        {"tool": "open_app", "args": {"name": "terminal"}},
+        {"tool": "play_music", "args": {"query": "lofi hip hop"}}
+      ]
+    },
+    {
+      "name": "morning routine",
+      "phrases": ["morning routine", "good morning max", "start my day"],
+      "steps": [
+        {"tool": "health_report", "args": {}},
+        {"tool": "get_datetime", "args": {}},
+        {"tool": "list_reminders", "args": {}}
+      ]
+    },
+    {
+      "name": "break time",
+      "phrases": ["break time", "take a break", "im taking a break"],
+      "steps": [
+        {"tool": "set_reminder", "args": {"message": "break is over", "minutes": 10}}
+      ]
+    }
+  ]
+}

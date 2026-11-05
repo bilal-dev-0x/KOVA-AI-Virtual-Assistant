@@ -231,6 +231,52 @@ def gpu_temperature():
         return None
 
 
+def _top_programs(count=3):
+    """[(name, MB)] of the programs using the most RAM, every process of a program added up."""
+    totals = _program_totals()
+    return sorted(totals.items(), key=lambda item: item[1], reverse=True)[:count]
+
+
+def health_report():
+    """Two spoken sentences on the PC's health plus a printed table."""
+    from modules.system_info import say_duration, uptime_seconds
+    cpu = cpu_percent()
+    ram = ram_info()
+    disks = disk_info()
+    battery = battery_info()
+    uptime = uptime_seconds()
+    top = _top_programs(3)
+
+    worries = []
+    if cpu >= 85:
+        worries.append(f"the CPU is busy at {cpu:.0f} percent")
+    if ram["percent"] >= 85:
+        worries.append(f"RAM is at {ram['percent']:.0f} percent")
+    low = [d for d in disks if 100 - d["percent"] < 10]
+    worries += [f"drive {d['drive']} has only {d['free_gb']:.0f} gigabytes free" for d in low]
+    if battery and not battery["plugged"] and battery["percent"] < 20:
+        worries.append(f"the battery is down to {battery['percent']:.0f} percent")
+
+    first = (f"CPU {cpu:.0f} percent, RAM {ram['percent']:.0f} percent"
+             + (f", battery {battery['percent']:.0f} percent" if battery else "")
+             + f", on for {say_duration(uptime)}.")
+    if worries:
+        second = "Watch out: " + ", and ".join(worries) + "."
+    else:
+        second = "Everything looks healthy."
+    if top:
+        second += f" {top[0][0].removesuffix('.exe')} uses the most RAM, {_size(top[0][1])}."
+
+    lines = [f"  CPU      {cpu:.0f}%",
+             f"  RAM      {ram['used_gb']:.1f} / {ram['total_gb']:.1f} GB ({ram['percent']:.0f}%)"]
+    lines += [f"  Disk {d['drive']}  {d['free_gb']:.0f} GB free of {d['total_gb']:.0f} GB" for d in disks]
+    if battery:
+        lines.append(f"  Battery  {battery['percent']:.0f}% ({'charging' if battery['plugged'] else 'on battery'})")
+    lines.append(f"  Uptime   {say_duration(uptime)}")
+    lines += [f"  #{i} RAM  {name:<24} {_size(mb)}" for i, (name, mb) in enumerate(top, 1)]
+    return Result(True, f"{first} {second}", detail="\n".join(lines))
+
+
 def system_status():
     cpu = cpu_percent()
     ram = ram_info()

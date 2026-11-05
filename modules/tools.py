@@ -32,7 +32,7 @@ def _check_restartable(name):
 
 
 @tool("Open an app or website by name, e.g. 'chrome', 'vs code', 'youtube'. Any Start menu app works.",
-      params={"name": "App or website name"})
+      params={"name": "App or website name"}, confirm_text="open {name}")
 def open_app(name: str):
     result = system_control.open_target(name, _context["config"])
     if result.success:
@@ -228,7 +228,7 @@ def volume_down(percent: int = 10):
     return _press("volume_down", max(1, min(percent, 100)) // 2 or 1, "Volume down.", undo_key="volume_up")
 
 
-@tool("Mute or unmute the sound.")
+@tool("Mute or unmute the sound.", confirm_text="mute or unmute the sound")
 def mute():
     result = media_keys.mute()
     result.undo = media_keys.mute
@@ -236,12 +236,12 @@ def mute():
     return result
 
 
-@tool("Pause or resume whatever is playing.")
+@tool("Pause or resume whatever is playing.", confirm_text="pause or resume the music")
 def play_pause():
     return media_keys.play_pause()
 
 
-@tool("Skip to the next track.")
+@tool("Skip to the next track.", confirm_text="skip to the next track")
 def next_track():
     return media_keys.next_track()
 
@@ -252,7 +252,7 @@ def previous_track():
 
 
 @tool("Play a song: from the user's music library if it's there, otherwise a YouTube search.",
-      params={"query": "Song or artist"})
+      params={"query": "Song or artist"}, confirm_text="play {query}")
 def play_music(query: str):
     query = re.sub(r"^(the )?song ", "", query.lower())
     query = re.sub(r" (song|on youtube)$", "", query)
@@ -361,7 +361,7 @@ def web_search(query: str):
     return Result(True, answer)
 
 
-@tool("The current date and time on this PC.")
+@tool("The current date and time on this PC.", confirm_text="tell you the time")
 def get_datetime():
     return Result(True, datetime.now().strftime("%A %d %B %Y, %I:%M %p"))
 
@@ -373,7 +373,9 @@ TIMER_WORDS = {"timer", "alarm", "times up", "time's up", "time is up", "timer d
 @tool("Set a reminder or timer. Give either minutes from now or a clock time.",
       params={"message": "What to remind the user about",
               "minutes": "Minutes from now (can be a fraction)",
-              "at_time": "Clock time today as HH:MM in 24-hour format, e.g. '17:30'"})
+              "at_time": "Clock time today as HH:MM in 24-hour format, e.g. '17:30'"},
+      confirm_text=lambda a: (f"set a reminder for {a['at_time']}: {a['message']}" if a.get("at_time") else
+                              f"set a reminder in {reminders.describe_delay(a.get('minutes', 0) * 60)}: {a['message']}"))
 def set_reminder(message: str, minutes: float = 0, at_time: str = ""):
     if at_time:
         seconds = reminders.seconds_until(at_time)
@@ -400,7 +402,7 @@ def set_reminder(message: str, minutes: float = 0, at_time: str = ""):
     return result
 
 
-@tool("List the reminders that haven't gone off yet.")
+@tool("List the reminders that haven't gone off yet.", confirm_text="read your reminders")
 def list_reminders():
     waiting = reminders.pending()
     if not waiting:
@@ -525,3 +527,141 @@ def forget_all_memories():
 
 def _capital(text):
     return text[:1].upper() + text[1:]
+
+
+# ---------- system intelligence (Day 3) ----------
+
+@tool("A full health check of the PC: CPU, RAM, disks, battery, uptime and the 3 programs using the most RAM, "
+      "with anything worrying named. Use it for 'how is my PC doing' or 'why is my PC slow'.",
+      confirm_text="check your PC's health")
+def health_report():
+    return performance_monitor.health_report()
+
+
+@tool("How long the PC has been on since it was last started.")
+def uptime():
+    from modules import system_info
+    return system_info.uptime_report()
+
+
+@tool("The apps that start with Windows (read only; Max never changes them).")
+def startup_apps():
+    from modules import system_info
+    return system_info.startup_report()
+
+
+@tool("The Windows power plan in use.")
+def power_plan():
+    from modules import system_info
+    return system_info.power_plan_report()
+
+
+@tool("Switch the Windows power plan. Undo switches back to the plan before.",
+      params={"plan": ("Which plan", ["balanced", "high performance", "power saver", "ultimate performance"])},
+      level=CONTROLLED, confirm_text="switch the power plan to {plan}")
+def set_power_plan(plan: str):
+    from modules import system_info
+    return system_info.set_power_plan(plan)
+
+
+# ---------- alerts ----------
+
+@tool("Turn Max's PC alerts on or off: low battery, RAM almost full, a drive almost full. "
+      "Checked once a minute; each alert repeats at most every 30 minutes. Remembered next time too.",
+      params={"on": "True to turn alerts on, False to turn them off"})
+def set_alerts(on: bool):
+    from modules import alerts
+    was_on = alerts.running()
+    _switch_alerts(on)
+    limits = alerts.thresholds(_context["config"])
+    if on:
+        message = (f"Alerts are on. I'll warn you when the battery drops below {limits['ALERT_BATTERY_PERCENT']:.0f} percent, "
+                   f"RAM goes over {limits['ALERT_RAM_PERCENT']:.0f} percent, or a drive has less than "
+                   f"{limits['ALERT_DISK_FREE_PERCENT']:.0f} percent free.")
+    else:
+        message = "Alerts are off."
+    result = Result(True, message)
+    result.undo = lambda: _switch_alerts(was_on) or Result(True, f"Alerts are {'on' if was_on else 'off'} again.")
+    result.undo_text = f"turn alerts {'on' if was_on else 'off'} again"
+    return result
+
+
+def _switch_alerts(on):
+    from modules import alerts
+    save_setting("ALERTS_ON", bool(on))
+    if on:
+        alerts.start(_context["config"])
+    else:
+        alerts.stop()
+
+
+# ---------- routines ----------
+
+def _routines():
+    from modules import routines
+    found, problems, file = routines.cached()
+    return routines, found, problems, file
+
+
+def _check_routine(name):
+    routines, found, _, _ = _routines()
+    if routines.find(found, name) is None:
+        names = ", ".join(r.name for r in found) or "none yet"
+        return Result(False, f"I don't have a routine called {name}. Your routines: {names}.")
+    return None
+
+
+def _describe_routine(args):
+    routines, found, _, _ = _routines()
+    routine = routines.find(found, args.get("name", ""))
+    return f"run {routine.name}: {routine.describe()}" if routine else f"run the routine {args.get('name')}"
+
+
+@tool("List the user's routines: named sets of steps, like 'coding mode'.")
+def list_routines():
+    routines, found, problems, file = _routines()
+    return routines.list_report(found, problems, file)
+
+
+@tool("Run one of the user's routines by name, e.g. 'coding mode'. Its steps run in order and it stops "
+      "at the first step that fails. See list_routines for the names.",
+      params={"name": "Routine name"},
+      level=CONTROLLED, confirm_text=_describe_routine, check=_check_routine)
+def run_routine(name: str):
+    routines, found, _, _ = _routines()
+    runner, confirm = _context.get("runner"), _context.get("confirm")
+    if runner is None:
+        return Result(False, "Routines need Max's action runner, which isn't set up.")
+    # Approved already, as one plan: only critical steps ask again
+    return routines.run(routines.find(found, name), runner, confirm or (lambda q: False), approved=True)
+
+
+# ---------- activity ----------
+
+@tool("What Max did for the user in a period: apps opened and closed, songs played, reminders set. "
+      "Read from Max's own action log.",
+      params={"period": ("Which period", ["today", "yesterday", "this week", "last 7 days", "last week"]),
+              "focus": ("What to count", ["all", "apps", "songs"])})
+def activity_summary(period: str = "today", focus: str = "all"):
+    from modules import actions, activity
+    return activity.activity_summary(actions.ACTIONS_LOG, period, focus)
+
+
+# ---------- folders and terminals ----------
+
+def _check_folder(path):
+    if not system_control.spoken_path(path):
+        return Result(False, f"I can't find a folder called {path}.")
+    return None
+
+
+@tool("Open a folder in File Explorer. Give a full path like 'D:\\Code' or say it like 'D drive coding arc'.",
+      params={"path": "Folder path"}, confirm_text="open the folder {path}", check=_check_folder)
+def open_folder(path: str):
+    return system_control.open_folder(system_control.spoken_path(path))
+
+
+@tool("Close the open terminal windows (PowerShell, Command Prompt), never the one Max runs in.",
+      level=CONTROLLED, confirm_text="close the terminal windows")
+def close_terminals():
+    return system_control.close_terminals()

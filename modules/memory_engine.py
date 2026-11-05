@@ -8,7 +8,9 @@ from pathlib import Path
 from modules.logger import get_logger
 
 # Max's long-term memory: facts and preferences you told it, kept in one SQLite
-# file on this PC (data/ is gitignored). Nothing here goes online.
+# file on this PC (data/ is gitignored). Matching is offline too. The only facts that
+# leave the PC are the few that match an AI request, added to it so the brain knows
+# them (MEMORY_IN_AI_REQUESTS in config.json, on by default).
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DB_FILE = BASE_DIR / "data" / "memory.db"
@@ -103,6 +105,73 @@ def keywords(text):
     return {w for w in WORD.findall(_key(text)) if w not in STOP_WORDS}
 
 
+# ---------- matching by meaning, offline ----------
+# Words that mean nearly the same to a person asking about themselves:
+# "where do I keep my code" should find "My project folder is D:\Code".
+SYNONYMS = [
+    {"folder", "directory", "dir", "path", "location", "place", "keep", "stored", "saved"},
+    {"music", "song", "track", "tune", "listen", "playlist"},
+    {"like", "love", "enjoy", "prefer", "favourite", "favorite", "fan"},
+    {"hate", "dislike"},
+    {"pc", "computer", "laptop", "machine", "desktop"},
+    {"job", "work", "office", "company", "employer", "workplace"},
+    {"phone", "mobile", "cell"},
+    {"birthday", "born", "birth", "bday"},
+    {"live", "home", "city", "town", "hometown", "address", "from"},
+    {"learn", "learner", "learning", "study", "student", "studying"},
+    {"code", "coding", "program", "programming", "developer", "dev", "coder"},
+    {"car", "vehicle", "bike", "motorbike"},
+    {"wife", "husband", "partner", "girlfriend", "boyfriend"},
+    {"mom", "mother", "mum", "ammi", "dad", "father", "abbu", "parent"},
+    {"school", "university", "college", "uni"},
+    {"food", "eat", "dish", "meal"},
+    {"game", "gaming", "play", "gamer"},
+]
+_GROUP = {}
+for _i, _group in enumerate(SYNONYMS):
+    for _word in _group:
+        _GROUP.setdefault(_word, set()).add(_i)
+
+_SUFFIXES = ("ing", "ers", "er", "ies", "es", "ed", "s")
+
+
+def stem(word):
+    """'folders' -> 'folder', 'coding' -> 'cod', 'learner' -> 'learn': crude, but the same for both sides."""
+    for suffix in _SUFFIXES:
+        if word.endswith(suffix) and len(word) - len(suffix) >= 3:
+            return word[: -len(suffix)] + ("y" if suffix == "ies" else "")
+    return word
+
+
+def _groups(word):
+    return _GROUP.get(word, set()) | _GROUP.get(stem(word), set())
+
+
+def word_score(wanted, words, stems):
+    """How well one query word is found among a fact's words: 1 exact, 0.85 same stem,
+    0.8 same meaning group, 0.7 a near spelling ("pyton"), else 0."""
+    from difflib import SequenceMatcher
+    if wanted in words:
+        return 1.0
+    if stem(wanted) in stems:
+        return 0.85
+    meanings = set().union(*(_groups(w) for w in words)) if words else set()
+    if _groups(wanted) & meanings:
+        return 0.8
+    if len(wanted) >= 5 and any(len(w) >= 5 and SequenceMatcher(None, wanted, w).ratio() >= 0.8 for w in words):
+        return 0.7
+    return 0.0
+
+
+def match_score(query_words, fact_text):
+    """The share of the query's keywords the fact covers, each weighted by how well it matched."""
+    words = keywords(fact_text)
+    if not query_words or not words:
+        return 0.0
+    stems = {stem(w) for w in words}
+    return sum(word_score(w, words, stems) for w in query_words) / len(query_words)
+
+
 class Memory:
     """The fact store. Opens the database on first use, so startup stays fast."""
 
@@ -190,18 +259,41 @@ class Memory:
         with self._lock:
             return self._db().execute("SELECT COUNT(*) FROM facts").fetchone()[0]
 
-    def find(self, query, limit=3, min_score=0.34):
-        """Facts sharing words with the query, best first, as [(score, fact)].
+    def find(self, query, limit=3, min_score=0.5):
+        """Facts that match the query, best first, as [(score, fact)].
 
-        Score = the share of the query's keywords found in the fact. Step 3 of Day 3
-        adds fuzzy and meaning-based matching on top of this.
+        Score = the share of the query's keywords the fact covers: exact words count fully,
+        the same stem, a word of the same meaning ("directory" for "folder") or a near
+        spelling count a little less. All offline, so it works with any brain or none.
         """
         wanted = keywords(query)
         if not wanted:
             return []
         scored = []
         for fact in self.all():
-            score = len(wanted & keywords(fact.text)) / len(wanted)
+            score = match_score(wanted, fact.text)
+            if score >= min_score:
+                scored.append((round(score, 3), fact))
+        scored.sort(key=lambda pair: (-pair[0], -pair[1].updated))
+        return scored[:limit]
+
+    def related(self, request, limit=3, min_score=0.6):
+        """Facts a longer request is about, best first, as [(score, fact)].
+
+        find() asks "does this fact answer the question?" and suffers when a request is full of
+        action words ("open my project folder and then play something"). This asks the other way
+        round: how much of what the fact is about (its topic, "my project folder", or its words)
+        does the request mention? The better of the two scores counts.
+        """
+        wanted = keywords(request)
+        if not wanted:
+            return []
+        stems = {stem(w) for w in wanted}
+        scored = []
+        for fact in self.all():
+            about = keywords(topic_of(fact.text) or fact.text)
+            covered = sum(word_score(w, wanted, stems) for w in about) / len(about) if about else 0.0
+            score = max(covered, match_score(wanted, fact.text))
             if score >= min_score:
                 scored.append((round(score, 3), fact))
         scored.sort(key=lambda pair: (-pair[0], -pair[1].updated))
