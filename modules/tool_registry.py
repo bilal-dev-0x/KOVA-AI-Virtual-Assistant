@@ -31,7 +31,7 @@ class Tool:
     func: Callable
     params: dict             # name -> {"type", "description", "required", "enum"}
     level: str = SAFE
-    confirm_text: str = ""   # how the action is described when asking, e.g. "close {name}"
+    confirm_text: str = ""   # how the action is described when asking, e.g. "close {name}", or a function of args
     check: Callable = None   # check(**args) -> Result explaining why it can't run, or None
 
     def schema(self):
@@ -51,6 +51,9 @@ class Tool:
         """'close discord', used in approval questions and the trace."""
         if self.confirm_text:
             try:
+                if callable(self.confirm_text):
+                    # Some questions depend on which arguments were given (close a whole app or one window)
+                    return self.confirm_text(args)
                 return self.confirm_text.format(**args)
             except (KeyError, IndexError):
                 pass

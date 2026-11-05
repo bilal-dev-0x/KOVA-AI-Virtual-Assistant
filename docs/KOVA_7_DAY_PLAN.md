@@ -24,7 +24,6 @@ Each day lists **Core** (must ship), **Advanced** (target) and **Stretch** (only
 ---
 
 ## Day 1 (Tue 3 Nov): Foundation — roadmap Phase 1 ✅ DONE
-*Checklist: [PHASE1_PLAN.md](PHASE1_PLAN.md).*
 - Command router with safety levels; text mode and voice mode.
 - Open, close, restart and list apps (`apps.json` plus every Start-menu app); websites.
 - On-demand CPU, RAM, disk and battery; media keys; music with fuzzy matching.
@@ -38,7 +37,7 @@ Each day lists **Core** (must ship), **Advanced** (target) and **Stretch** (only
 
 Moved to Day 7: idle RAM/CPU measurements and the README.
 
-## Day 2 (Wed 4 Nov): The Agent Brain 🧠 — roadmap Phase 3 + Safety model ✅ BUILT (waiting for your voice test)
+## Day 2 (Wed 4 Nov): The Agent Brain 🧠 — roadmap Phase 3 + Safety model ✅ DONE
 *Built:*
 - every Core item;
 - Advanced: context, reminders, undo, plugins, live trace, process tools;
@@ -84,7 +83,8 @@ Moved to Day 7: idle RAM/CPU measurements and the README.
 
 **Demo:** *"My laptop feels slow, close whatever is wasting RAM except VS Code, then tell me how much I saved."*
 
-## Day 3 (Thu 5 Nov): Memory + a Max that keeps watch 🧩 — roadmap Phases 4 and 2
+## Day 3 (Thu 5 Nov): Memory + a Max that keeps watch 🧩 — roadmap Phases 4 and 2 🔨 IN PROGRESS
+*Today's plan and checklist: [DAY3_PLAN.md](DAY3_PLAN.md).*
 **Core**
 - `memory_engine.py` (SQLite): facts, preferences, an activity history.
 - Memory review, correction and deletion: "what do you remember about me?", "forget that".

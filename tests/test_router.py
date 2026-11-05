@@ -442,3 +442,15 @@ def test_restart_yourself_uses_the_assistant_name():
     agent = Agent({"ASSISTANT_NAME": "Nova", "WAKE_WORDS": ["nova"]})
     assert agent.match("restart nova")[0].name == "restart yourself"
     assert agent.match("restart max")[0].name == "restart"   # "max" is just an app name now
+
+
+def test_answer_that_repeats_the_command_uses_its_target(monkeypatch):
+    # Heard "can you open", then "can you open a emu 8086" as the answer to "Open what?"
+    from modules import system_control as sc
+    opened = []
+    monkeypatch.setattr(sc, "open_target", lambda name, config=None: opened.append(name) or Result(True, f"Opening {name}"))
+    agent = Agent({})
+    agent.ask = lambda question: "can you open a emu 8086"
+    result = agent.handle("can you open")
+    assert opened == ["emu 8086"]
+    assert result.success

@@ -37,20 +37,55 @@ def _pronounce(text):
     return text
 
 
+EDGE_HOST = "speech.platform.bing.com"
+EDGE_MAX_RETRY_SECONDS = 30 * 60
+DNS_WAIT_SECONDS = 1.5
+_edge_failures = 0
+
+
+def _host_resolves(host, wait_seconds=DNS_WAIT_SECONDS):
+    """True if the name resolves within wait_seconds. A broken DNS server can take 10 s to say no,
+    which Max would otherwise spend silent before every line."""
+    import socket
+    import threading
+    found = []
+    def look_up():
+        try:
+            found.append(bool(socket.getaddrinfo(host, 443)))
+        except OSError:
+            found.append(False)
+    worker = threading.Thread(target=look_up, daemon=True)
+    worker.start()
+    worker.join(wait_seconds)
+    return bool(found and found[0])
+
+
+def _edge_failed(reason):
+    """Use the fallback for a while; longer each time it fails again (2, 4, 8... up to 30 minutes)."""
+    global _edge_down_until, _edge_failures
+    _edge_failures += 1
+    wait = min(EDGE_RETRY_SECONDS * 2 ** (_edge_failures - 1), EDGE_MAX_RETRY_SECONDS)
+    _edge_down_until = time.time() + wait
+    log.warning("Natural voice failed (%s), using the fallback for %ss", reason, wait)
+
+
 def _edge_mp3(text, filename):
     """Save text as speech with the natural voice. Returns False if the service failed."""
-    global _edge_down_until
+    global _edge_failures
     if time.time() < _edge_down_until:
+        return False
+    if not _host_resolves(EDGE_HOST):
+        _edge_failed("no DNS answer")
         return False
     try:
         import asyncio
         import edge_tts
         speech = edge_tts.Communicate(text, VOICES[_gender], connect_timeout=5, receive_timeout=6)
         asyncio.run(speech.save(filename))
+        _edge_failures = 0
         return True
     except Exception as e:
-        log.warning("Natural voice failed (%s), using the fallback for %ss", type(e).__name__, EDGE_RETRY_SECONDS)
-        _edge_down_until = time.time() + EDGE_RETRY_SECONDS
+        _edge_failed(type(e).__name__)
         return False
 
 
@@ -97,7 +132,9 @@ def speak(text):
     try:
         _speak_online(text)
     except Exception as e:
-        log.warning("Online voice failed (%s), using the Windows voice", e)
+        # The male voice while edge is down is the expected fallback, not news on every line
+        (log.debug if str(e) == "no online male voice" else log.warning)(
+            "Online voice failed (%s), using the Windows voice", e)
         try:
             _speak_offline(text)
         except Exception as e:

@@ -5,7 +5,7 @@ from typing import Callable
 
 import brain
 import music_library  # noqa: F401  (tests reach the library through here)
-from modules import agent_loop, media_keys, reminders, system_control, tool_registry, tools  # noqa: F401
+from modules import agent_loop, media_keys, memory_engine, reminders, system_control, tool_registry, tools  # noqa: F401
 from modules.actions import ActionRunner
 from modules.fuzzy import best_match
 from modules.logger import get_logger
@@ -43,13 +43,46 @@ PRONOUN_WORDS = {"it", "that", "this", "them"}
 # "can you search anything" asks what Max can do, it isn't a search for the word "anything"
 VAGUE_TARGETS = {"anything", "something", "stuff", "things", "something for me", "anything for me"}
 
+# Memory commands stay local even when long: "remember I like lo-fi when coding and jazz when gaming".
+# "remember to call mom" is a reminder, not a fact, so it is left to the reminder or the agent.
+MEMORY_COMMAND = re.compile(r"^(remember|dont forget|keep in mind|forget)\b(?! to\b)")
+# The fact is taken from what was said, before normalize() lowercased it and dropped "D:\\"
+REMEMBER_RAW = re.compile(r"\b(remember|don'?t forget|keep in mind)(\s+that)?[\s,:]+(?P<fact>.+)$",
+                          re.IGNORECASE | re.DOTALL)
+# Commands whose "it"/"that" is not the last app ("forget that" = the last fact)
+OWN_PRONOUNS = {"forget"}
+
 # Requests with several parts or conditions go to the agent when Gemini is set up:
 # a local regex would only see one part ("close whatever uses ram except vs code" is not "ram")
 JOINERS = re.compile(r"\b(and|then|so|after|before|except|but|if|unless|whatever|whichever|because|while|instead)\b")
 MAX_LOCAL_WORDS = 8
+# "how is my cpu and ram" has an "and" but only asks for the system status
+STATUS_ONLY = re.compile(
+    r"^((how much|how|what)( is| are|s)?( my| the)? |(check|show|tell|give)( me)?( my| the)? |(my|the) )?"
+    r"((cpu|processor) and (ram|memory)|(ram|memory) and (cpu|processor))"
+    r"( usage| use| status| doing| looking| like| right now| now| am i using| is being used)*$")
+# Answers that drop the question: "Close what?" -> "never mind" / "ok bye"
+NEVER_MIND = re.compile(r"^(no|nope|nah|none|nothing|cancel|stop|never ?mind|nevermind|forget it|leave it|"
+                        r"bye|goodbye|good bye|bye bye|neither|no thanks)( then| thanks| thank you| bye)?$")
+
+
+# What Google hears instead of a short command, seen in the logs. Only a whole-sentence match
+# is replaced, so "the opposite of" in a longer request is left alone.
+MISHEARD = {"opposite": "pause it", "positive": "pause it", "a pause it": "pause it", "pozit": "pause it",
+            "pass it": "pause it", "boss it": "pause it", "paws it": "pause it", "pause pause it": "pause it"}
+MISHEARD_START = [(re.compile(r"^forgot\b"), "forget")]
+
+
+def fix_misheard(text):
+    text = MISHEARD.get(text, text)
+    for pattern, said in MISHEARD_START:
+        text = pattern.sub(said, text)
+    return text
 
 
 def needs_agent(text):
+    if STATUS_ONLY.match(text):
+        return False
     if JOINERS.search(text):
         return True
     # Long but plain reminders ("set a timer of for 30 minutes 30 seconds") parse fine locally
@@ -257,6 +290,10 @@ class Agent:
         self.runner = ActionRunner()
         self.session = None
         self.recent_local = []  # local commands since the last agent request, for context
+        self.raw_text = ""      # what was said, before normalize(): memory keeps its capitals and paths
+        self.last_fact = None   # the memory "forget that" means
+        self.closing_title = None  # (app, window title) when "close lofi music" named a window, not an app
+        self.last_played = None    # what "close the song" means
         self.trace = print if self.config.get("AGENT_TRACE", True) else (lambda line: None)
         self.commands = self._build_commands()
 
@@ -280,6 +317,21 @@ class Agent:
                     self.greet),
             Command("undo", r"^(undo|undo (that|it|the last (thing|action|one))|take (that|it) back|reverse that)$",
                     lambda arg: self.runner.undo_last(), help="undo"),
+            Command("remember", r"^(remember|dont forget|keep in mind)( that)? (?!to )(?P<arg>.+)$",
+                    self.remember, help="remember <something about you>"),
+            # "remember to call mom" is a task, not a fact about you
+            Command("remember to", r"^(remember|dont forget) to (?P<arg>.+)$", self.remember_to),
+            Command("list memories", r"^(what|tell me what|tell me everything)( else)?( do)? you (remember|know)"
+                                     r"( about me)?$|^what have i told you( about me)?$|^who am i$"
+                                     r"|^(list|show)( me)?( all)?( my| your)? (memories|memory|facts)$"
+                                     r"|^(whats|what is) in your memory$|^do you (remember|know) (anything|something)"
+                                     r" about me$",
+                    self.list_memories, help="what do you know about me"),
+            Command("forget all", r"^(forget|erase|wipe) (everything|all)\b.*$"
+                                  r"|^(delete|erase|clear|wipe|reset)( all)?( of)?( my| your| the)? (memories|memory)$",
+                    self.forget_all, help="forget everything"),
+            Command("forget", r"^(forget|delete the memory|remove the memory)( about(?= )| that(?= ))?( (?P<arg>.+))?$",
+                    self.forget, help="forget <something> / forget that", ask_text="Forget what?"),
             Command("list reminders", r"^((list|show)( my| the)? (reminders|timers)|(what|which) (reminders|timers) do i have)$",
                     lambda arg: tool("list_reminders"), help="list reminders"),
             Command("cancel reminders", r"^(cancel|clear|stop|delete)( all)?( my| the)? (reminders?|timers?|alarms?)$",
@@ -292,8 +344,12 @@ class Agent:
             Command("previous track", r"^(play )?(the )?(previous|last)( (song|track|video))?$|^go back$",
                     lambda arg: tool("previous_track"), help="previous"),
             Command("play pause", r"^(play|pause|resume|continue|play pause)( (the )?(music|song|video))?$"
-                                  r"|^(stop|close|pause|end) (the |this )?(music|song|video)( now)?$",
+                                  r"|^(stop|pause|end) (the |this )?(music|song|video)( now)?$"
+                                  r"|^(pause|resume|stop|unpause|play) (it|this|that)( again| now| for (a|one) (sec|second|minute))?$",
                     lambda arg: tool("play_pause"), help="pause / resume"),
+            # "close the song": the YouTube tab it plays in, not just a pause
+            Command("close song", r"^(close|quit|exit|kill|shut) (the |this |that )?(music|song|video)( tab| now)?$",
+                    self.close_song, help="close the song"),
             Command("volume up", r"\b(volume up|turn (it |the volume )?up|increase (the )?volume|raise (the )?volume|louder)\b",
                     lambda arg: tool("volume_up"), help="volume up / down"),
             Command("volume down", r"\b(volume down|turn (it |the volume )?down|decrease (the )?volume|lower (the )?volume|quieter|softer)\b",
@@ -305,8 +361,7 @@ class Agent:
                              rf"|^(talk|speak|sound) like a (?P<arg3>{_GENDER})$"
                              r"|^(change|switch) (your |the )?voice$",
                     lambda arg: tool("set_voice", **voice_args(arg)), help="use a male / female voice"),
-            Command("play", r"^play (?P<arg>.+)$",
-                    lambda arg: tool("play_music", query=arg), help="play <song>"),
+            Command("play", r"^play (?P<arg>.+)$", self.play, help="play <song>"),
             Command("list apps", r"\b((list|show)( the| my)?( running| open)? apps?\b|(what|which) apps are (running|open))\b",
                     lambda arg: tool("list_running_apps"), help="list apps"),
             Command("top cpu", r"\b(top|heaviest|biggest) (processes|programs|apps) by cpu\b|\bwhat is using (my |the )?(cpu|processor)\b",
@@ -341,8 +396,7 @@ class Agent:
                     prepare=lambda arg: system_control.check_force(arg)),
             Command("close", r"^(close|quit|kill|exit)( (?P<arg>.+))?$",
                     lambda arg: tool("close_app", name=arg), level=CONTROLLED, help="close <app>",
-                    confirm_text="Close {arg}?", ask_text="Close what?",
-                    prepare=lambda arg: system_control.check_app(arg, must_be_running=True)),
+                    confirm_text="Close {arg}?", ask_text="Close what?", prepare=self._prepare_close),
             Command("restart", r"^(restart|reopen|relaunch)( (?P<arg>.+))?$",
                     lambda arg: tool("restart_app", name=arg), level=CONTROLLED, help="restart <app>",
                     confirm_text="Restart {arg}?", ask_text="Restart what?",
@@ -374,6 +428,11 @@ class Agent:
                     ask_text="What should I search for?"),
             Command("gpu", r"\b(gpu|graphics card|video card)\b",
                     lambda arg: tool("gpu_usage"), help="gpu usage"),
+            # Last, so "what is my cpu usage" and "whats my battery" stay system commands
+            Command("recall", r"^(what|where|which|who|when)( is| are|s| was| were)? my (?P<arg>.+)$"
+                              r"|^do you (remember|know) (what|where|which|who|when) my (?P<arg2>.+?)( is| are)?$"
+                              r"|^do you (remember|know) my (?P<arg3>.+)$",
+                    self.recall, help="what's my <something>"),
             Command("news", r"^((tell me|read|get|show) )?(me )?(the )?((latest|top|global|todays|daily) )?(news|headlines)( today)?$",
                     self.news, help="news"),
         ]
@@ -418,7 +477,8 @@ class Agent:
         return None, None
 
     def handle(self, raw_text):
-        text = self.normalize(raw_text)
+        self.raw_text = raw_text
+        text = fix_misheard(self.normalize(raw_text))
         log.info("Input: %s", text)
 
         if not text:
@@ -426,7 +486,7 @@ class Agent:
 
         # Hybrid routing: simple commands stay local (instant, free, offline),
         # requests with several parts go to the agent
-        if self.provider and needs_agent(text):
+        if self.provider and needs_agent(text) and not MEMORY_COMMAND.match(text):
             return self._ask_agent(raw_text)
 
         if text.startswith("google ") and system_control.is_app_alias(text):
@@ -437,7 +497,9 @@ class Agent:
         if command is None:
             return self._fallback(raw_text, text)
 
-        if arg in PRONOUNS or (arg and arg.split()[0] in PRONOUN_WORDS):
+        if command.name in OWN_PRONOUNS:
+            pass
+        elif arg in PRONOUNS or (arg and arg.split()[0] in PRONOUN_WORDS):
             # "close it" and "close it so i can have my ram" both mean the last app
             arg = self.runner.last_target
 
@@ -445,7 +507,11 @@ class Agent:
             arg = None
         if arg is None and command.ask_text:
             answer = self.ask(command.ask_text) or ""
-            arg = clean_arg(self.normalize(answer))
+            arg = self._answer(answer)
+            again, again_arg = self.match(arg or "")
+            if again is command and again_arg:
+                # "Open what?" -> "can you open emu 8086": the answer repeated the command
+                arg = again_arg
             if not arg:
                 return Result(False, "Okay, never mind.")
             raw_text = f"{raw_text} {answer}"
@@ -465,6 +531,8 @@ class Agent:
                 return problem
 
         window = None
+        if command.name == "close" and self.closing_title:
+            return self._close_titled(*self.closing_title)
         if command.name == "close":
             # Several windows: say which one ("Chrome has 2 windows... Which one?")
             window = self._ask_which_window(arg)
@@ -527,7 +595,54 @@ class Agent:
         print("Thinking.....")
         return agent_loop.run(self.session, message, self.runner, self.confirm, trace=self.trace)
 
+    def _answer(self, answer):
+        """An answer to a question, cleaned: 'the calculator' -> 'calculator'.
+        None when it drops the question ("never mind", "ok bye", silence)."""
+        text = self.normalize(answer or "")
+        if not text or NEVER_MIND.match(text):
+            return None
+        return clean_arg(text) or None
+
     # ---------- handlers ----------
+
+    def _prepare_close(self, arg):
+        """Like check_app, but "close lofi music" can also mean the window showing it."""
+        self.closing_title = None
+        key, problem = system_control.check_app(arg, must_be_running=True)
+        if problem and (problem.message.startswith("I don't know") or " is a website" in problem.message):
+            found = system_control.window_titled(arg)
+            if found:
+                log.info("Close %r means the %s window %r", arg, *found)
+                self.closing_title = found
+                return found[0], None
+        return key, problem
+
+    def play(self, query):
+        result = self._tool("play_music", query=query)
+        if result.success:
+            self.last_played = query
+        return result
+
+    def close_song(self, arg):
+        """Close the tab the song plays in: the one named like what Max last played, else any
+        YouTube tab. With no such tab (a local file in VLC), pause instead."""
+        found = (self.last_played and system_control.window_titled(self.last_played)) \
+            or system_control.window_titled("youtube")
+        if found and system_control.is_browser(found[0]):
+            return self._close_titled(*found)
+        return self._tool("play_pause")
+
+    def _close_titled(self, app, title):
+        """Close the window found by its title: one tab in a browser, the window anywhere else."""
+        self.closing_title = None
+        shown = system_control.spoken_title(title)
+        browser = system_control.is_browser(app)
+        question = f"Close the {shown} tab in {app}?" if browser else f"Close the {app} window {shown}?"
+        if not self.confirm(question):
+            return Result(False, "Okay, cancelled.")
+        if browser:
+            return self._tool("close_tab", name=app, title=title)
+        return self._tool("close_app", name=app, window=title)
 
     def _ask_which_window(self, app):
         """None: one window or none, ask as usual. A title or "" (all): the user picked.
@@ -543,7 +658,7 @@ class Agent:
             listed = "; ".join(f"{word}, {title}" for word, title in zip(("one", "two", "three", "four", "five"), titles))
             question = f"{app} has {len(titles)} windows: {listed}. Which one should I close, or all of them?"
         answer = self.normalize(self.ask(question) or "")
-        if not answer or answer in {"none", "no", "nothing", "cancel", "neither", "never mind"}:
+        if not answer or NEVER_MIND.match(answer):
             return Result(False, "Okay, I didn't close anything.")
         picked = pick_window(answer, titles)
         if picked is None:
@@ -573,11 +688,131 @@ class Agent:
         if ON_PC.search(query):
             query = ON_PC.sub("", query).strip()
             if not query or query in VAGUE_TARGETS:
-                query = clean_arg(self.normalize(self.ask("What should I look for on your PC?") or ""))
+                query = self._answer(self.ask("What should I look for on your PC?"))
                 if not query:
                     return Result(False, "Okay, never mind.")
             return self._tool("search_files", query=query)
         return self._tool("open_web_search", **search_args(query))
+
+    # ---------- memory ----------
+
+    def remember(self, arg):
+        found = REMEMBER_RAW.search(self.raw_text)
+        fact = (found["fact"] if found else arg).strip()
+        fact = re.sub(r"[\s,]+please[.!]*$", "", fact, flags=re.IGNORECASE).strip(" .!")
+        result = self._tool("remember", fact=fact)
+        if result.success:
+            self.last_fact = memory_engine.get_memory().all()[0]
+        return result
+
+    def list_memories(self, arg):
+        facts = memory_engine.get_memory().all()
+        # After hearing several, "forget that" could mean any of them: Max asks which
+        self.last_fact = facts[0] if len(facts) == 1 else None
+        return self._tool("list_memories")
+
+    def remember_to(self, task):
+        if self.provider:
+            return self._ask_agent(self.raw_text)
+        return Result(False, f"Do you want a reminder? Say remind me in 10 minutes to {task}.")
+
+    def recall(self, query):
+        found = memory_engine.get_memory().find(query, limit=1)
+        if not found and self.provider:
+            # "what's my ip address" isn't a memory; the agent has tools for it
+            return self._ask_agent(self.raw_text)
+        result = self._tool("recall", query=query)
+        if found:
+            self.last_fact = found[0][1]
+        return result
+
+    def forget(self, what, asked=False):
+        store = memory_engine.get_memory()
+        if what in PRONOUNS:
+            fact = self.last_fact and store.get(self.last_fact.id)
+            if fact:
+                return self._forget_facts([fact])
+            facts = store.all()
+            if not facts:
+                return Result(True, "I don't have any memories about you to forget.")
+            if len(facts) == 1:
+                return self._forget_facts(facts)
+            if asked:
+                return Result(False, "I'm not sure which memory you mean. Say forget, then what it's about.")
+            # "forget that" with nothing said about a memory this run: ask instead of guessing
+            answer = self._answer(self.ask("Which one should I forget?"))
+            if not answer:
+                return Result(False, "Okay, never mind.")
+            if re.match(r"^(yes )?(forget )?(all|everything|both)( of (it|them)| of my memories)?$", answer):
+                return self.forget_all(None)
+            again, again_arg = self.match(answer)
+            if again is not None and again.name == "forget" and again_arg:
+                answer = again_arg  # "forget my project folder" said as the answer
+            return self.forget(answer, asked=True)
+
+        facts, missing = self._find_facts(what)
+        if not facts:
+            return Result(False, f"I don't have anything saved about {what}.")
+        result = self._forget_facts(facts)
+        if missing and result.success:
+            result.message += " I had nothing saved about " + " or ".join(memory_engine.as_you(m) for m in missing) + "."
+        return result
+
+    @staticmethod
+    def _find_facts(what):
+        """The facts 'forget X and Y' means: one per part when the parts name different facts,
+        else the one fact the whole sentence matches ("forget that I like rock and roll").
+        Returns (facts, parts that matched nothing)."""
+        store = memory_engine.get_memory()
+        parts = [p.strip() for p in re.split(r"\b(?:and also|and|also)\b", what) if p.strip()]
+        if len(parts) > 1:
+            picked, missing = [], []
+            for part in parts:
+                hit = store.find(part, limit=1)
+                if not hit:
+                    missing.append(part)
+                elif hit[0][1].id not in {f.id for f in picked}:
+                    picked.append(hit[0][1])
+            if len(picked) >= 2:
+                return picked, missing
+        found = store.find(what, limit=1)
+        return ([found[0][1]] if found else []), []
+
+    def _forget_facts(self, facts):
+        said = [memory_engine.as_you(f.text) for f in facts]
+        if not self.confirm("Should I forget that " + ", and that ".join(said) + "?"):
+            return Result(False, "Okay, I'll keep it." if len(facts) == 1 else "Okay, I'll keep them.")
+        results = [self._tool("forget_memory", fact_id=f.id) for f in facts]
+        self.last_fact = None
+        if len(results) == 1:
+            return results[0]
+        done = [s for s, r in zip(said, results) if r.success]
+        if len(done) > 1:
+            # One "undo" brings all of them back, not just the last one
+            stack = self.runner.undo_stack
+            undos = [undo for _, undo in stack[-len(done):]]
+            del stack[-len(done):]
+            def undo_all():
+                for undo in undos:
+                    undo()
+                return Result(True, f"Okay, I remember those {len(undos)} things again.")
+            stack.append(("remember those again", undo_all))
+        if not done:
+            return results[0]
+        return Result(len(done) == len(results), "Okay, I forgot that " + ", and that ".join(done) + ".")
+
+    def forget_all(self, arg):
+        count = memory_engine.get_memory().count()
+        if not count:
+            return Result(True, "I don't have any memories about you to forget.")
+        things = f"{count} thing{'s' if count > 1 else ''}"
+        if not self.confirm(f"Should I forget everything I know about you? That's {things}."):
+            return Result(False, "Okay, I'll keep them.")
+        # Critical: asked twice, because it can't be undone
+        if not self.confirm("Are you sure? This can't be undone."):
+            return Result(False, "Okay, I'll keep them.")
+        self.last_fact = None
+        return self._tool("forget_all_memories")
 
     def exit(self, arg):
         return Result(True, f"Goodbye {self.title}.", stop=True)
