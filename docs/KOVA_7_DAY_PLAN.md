@@ -247,7 +247,14 @@ proposed fixes as a diff.
     (2,760 tokens of prompt + tools); after that ~9–10 s, because Ollama keeps what it read. So when
     Gemini runs low (80 % of `GEMINI_DAILY_LIMIT`, or half its models out of quota), Max warms the server
     up once in the background.
-  - The screen stays with Gemini (the server models can't see pictures).
+  - The screen: Gemini sees the picture. **✅ Since 6 Nov night**, when Gemini can't, the server answers
+    from the screen's **text**, read by the OCR built into Windows (`modules/ocr.py`, `winrt-Windows.Media.Ocr`):
+    free, offline, ~0.3 s, from the full-size screenshot (2x enlarged). It reads errors, pages and buttons,
+    but not pictures, colours or games. Live: a pygame traceback, explained with its fix, in 25 s.
+    Hard live test (3 rounds): errors, a busy log, an order table on a dark page, an empty window, a private
+    window and a follow-up all right in 15–22 s. Login codes and card numbers are hidden before the text
+    leaves the PC; text on screen that gives orders is never acted on (no tool runs while reading, and
+    "I will now…" sentences are dropped). The 4B model can still get sums or guesses wrong.
   - Not done, on purpose: the server's older news/weather API, because it loads a second 4B model next to
     `kova-cmd` (8 GB RAM, Bilal's rule: don't slow either PC). Later: rename it to KOVA and let it use
     `kova-cmd`.

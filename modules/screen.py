@@ -12,6 +12,8 @@ from modules.result import Result
 # terminal Max runs in), a named app's window, or the whole screen. It is shrunk to a JPEG in
 # memory, never written to disk (the relay brain's copy is deleted after its answer), and
 # kept about a minute so "and how do I fix it?" asks about the same picture.
+# A brain that can't see pictures (the KOVA server) gets the screen's text instead, read by
+# Windows OCR from the full-size screenshot, only when that brain is the one answering.
 
 log = get_logger()
 
@@ -24,9 +26,9 @@ DEFAULT_BLOCKLIST = ["password", "passwords", "1password", "bitwarden", "lastpas
                      "keeper", "authenticator", "bank", "banking", "hbl", "meezan", "ubl", "mcb", "alfalah",
                      "allied bank", "askari", "jazzcash", "easypaisa", "sadapay", "nayapay", "paypal",
                      "whatsapp", "telegram", "signal", "inprivate", "incognito"]
-NO_BRAIN = "Looking at the screen needs Gemini, and it isn't set up."
+NO_BRAIN = "Looking at the screen needs Gemini or the KOVA server, and neither is set up."
 
-_last = {"image": None, "label": "", "time": 0.0, "qa": []}  # the picture kept for follow-ups
+_last = {"image": None, "read": None, "label": "", "time": 0.0, "qa": []}  # the picture kept for follow-ups
 _blocked = {"request": None, "time": 0.0}                     # what "look anyway" would look at
 _forget_timer = None
 _lock = threading.Lock()
@@ -122,7 +124,7 @@ def recent(now=None):
 
 def forget():
     with _lock:
-        _last.update(image=None, label="", time=0.0, qa=[])
+        _last.update(image=None, read=None, label="", time=0.0, qa=[])
 
 
 def reset():
@@ -136,11 +138,23 @@ def reset():
     _blocked.update(request=None, time=0.0)
 
 
-def _keep(image, label):
+def _reader(picture):
+    """read() -> the text in the full-size picture: read once, the first time it's needed."""
+    text = []
+
+    def read():
+        if not text:
+            from modules import ocr
+            text.append(ocr.read_text(picture))
+        return text[0]
+    return read
+
+
+def _keep(image, read, label):
     """Keep the picture for follow-ups; a sleeping timer drops it after KEEP_SECONDS (no polling)."""
     global _forget_timer
     with _lock:
-        _last.update(image=image, label=label, time=time.time(), qa=[])
+        _last.update(image=image, read=read, label=label, time=time.time(), qa=[])
         if _forget_timer is not None:
             _forget_timer.cancel()
         _forget_timer = threading.Timer(KEEP_SECONDS, forget)
@@ -160,7 +174,7 @@ def look(question, what="window", app="", same_picture=False, provider=None, con
         # One snapshot under the lock: the timer may forget the picture at any moment
         with _lock:
             if _last["image"] is not None and time.time() - _last["time"] < KEEP_SECONDS:
-                image, label, qa = _last["image"], _last["label"], list(_last["qa"])
+                image, read, label, qa = _last["image"], _last["read"], _last["label"], list(_last["qa"])
         if image is not None:
             context = "\n".join(f"Q: {q}\nA: {a}" for q, a in qa)
     if image is None:  # a first look, or the last picture is gone: take a new one
@@ -175,9 +189,10 @@ def look(question, what="window", app="", same_picture=False, provider=None, con
                 raise Private(word)
             if isinstance(target, tuple):
                 kind, box = target
-                image = shrink(_grab_screen(None if kind == "all" else box))
+                picture = _grab_screen(None if kind == "all" else box)
             else:
-                image = shrink(_grab_window(target, words))
+                picture = _grab_window(target, words)
+            image, read = shrink(picture), _reader(picture)
         except Private as e:
             _blocked.update(request={"question": question, "what": what, "app": app}, time=time.time())
             log.info("Screenshot refused: '%s' is on the private list", e.args[0])
@@ -188,13 +203,13 @@ def look(question, what="window", app="", same_picture=False, provider=None, con
         except Exception as e:
             log.exception("Screenshot failed")
             return Result(False, "I couldn't take the screenshot.", detail=str(e))
-        _keep(image, label)
+        _keep(image, read, label)
         context = ""
 
     print(f"📸 Looking at {label}")
     log.info("Looking at %s (%s KB)", label, len(image) // 1024)
     try:
-        answer = provider.look(image, question, context)
+        answer = provider.look(image, question, context, read=read)
     except BrainError as e:
         return Result(False, str(e))
     if not answer:

@@ -172,7 +172,7 @@ def test_both_down_says_so(ollama):
         provider.session("x", []).send("hi")
 
 
-def test_the_screen_stays_with_gemini():
+def test_without_ocr_the_screen_stays_with_gemini():
     provider = hybrid.HybridProvider(DownGemini(), server.ServerProvider({}))
     assert provider.can_look and not server.ServerProvider({}).can_look
 
