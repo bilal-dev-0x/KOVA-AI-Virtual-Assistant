@@ -177,9 +177,9 @@ def test_programs_and_scripts_are_never_opened(opened, name):
 # ---------- create and rename ----------
 
 def test_create_rename_and_undo_keep_the_capitals(opened):
-    agent, asked = max_agent(True, True)
+    agent, asked = max_agent()
     assert agent.handle("create a folder called KOVA test on my desktop").success
-    assert asked.questions == ["Should I create the folder KOVA test in desktop?"]
+    assert asked.questions == []                       # undo takes it back, so no question
     assert (folder("desktop") / "KOVA test").is_dir()
     assert agent.handle("rename it to KOVA final").success
     assert (folder("desktop") / "KOVA final").is_dir()
@@ -362,7 +362,8 @@ def test_double_null_buffer():
 def test_file_tool_levels():
     get = tool_registry.get
     assert get("find_files").level == get("open_file").level == "safe"
-    assert get("create_item").level == get("rename_item").level == get("organise_folder").level == "controlled"
+    assert get("create_item").level == get("rename_item").level == "safe"          # undo takes them back
+    assert get("organise_folder").level == "controlled"                            # the preview is worth a look
     assert get("delete_items").level == "critical"
 
 
@@ -392,3 +393,15 @@ def test_spoken_dots_and_extensions(recycled):
     agent, asked = max_agent(True)
     assert agent.handle("delete the file pitbull png").success
     assert recycled == [str(pitbull)] and pic.exists()
+
+
+def test_undo_removes_a_folder_onedrive_marked_read_only():
+    # Live: OneDrive marked the new Documents\Code folder read-only, and undo left it behind
+    import stat
+    make(folder("documents") / "a.json")
+    files.organise("documents")
+    code = folder("documents") / "Code"
+    (code / "a.json").rename(folder("documents") / "moved.json")    # emptied, like after undo
+    os.chmod(code, stat.S_IREAD)
+    assert files._remove_empty_folder(str(code)) and not code.exists()
+    assert not files._remove_empty_folder(str(folder("documents")))  # not empty: kept

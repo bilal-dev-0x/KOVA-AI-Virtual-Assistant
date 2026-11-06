@@ -104,4 +104,8 @@ def test_no_key_means_no_provider():
     assert brain.get_provider({}) is None
     assert brain.get_provider({"GEMINI_API_KEY": "PASTE_YOUR_GEMINI_API_KEY_HERE"}) is None
     assert brain.get_provider({"GEMINI_API_KEY": "x", "BRAIN_PROVIDER": "ollama"}) is None
-    assert isinstance(brain.get_provider({"GEMINI_API_KEY": "x"}), gemini.GeminiProvider)
+    # Gemini first, the KOVA server as the backup; SERVER_BRAIN false keeps Gemini alone
+    both = brain.get_provider({"GEMINI_API_KEY": "x"})
+    assert both.name == "gemini+server" and isinstance(both.primary, gemini.GeminiProvider)
+    assert isinstance(brain.get_provider({"GEMINI_API_KEY": "x", "SERVER_BRAIN": False}), gemini.GeminiProvider)
+    assert brain.get_provider({"BRAIN_PROVIDER": "server"}).name == "server"

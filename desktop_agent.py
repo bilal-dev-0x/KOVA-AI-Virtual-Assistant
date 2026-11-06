@@ -567,8 +567,7 @@ class Agent:
             Command("press keys", r"^(press|hit)( the)? (?P<arg>enter|return|escape|esc|tab|(ctrl|control) [a-z])( key)?$",
                     lambda arg: tool("ui_press_keys", keys=arg), help="press enter / press ctrl s"),
             Command("click", r"^(click|tap|hit|press)( on)?( the)? (?P<arg>.+?)( button| link| tab| menu| option| checkbox)?$",
-                    lambda arg: tool("ui_click", name=self._said(arg)), level=CONTROLLED,
-                    confirm_text="Click {arg} in the window in front?", help="click <button name>"),
+                    lambda arg: tool("ui_click", name=self._said(arg)), help="click <button name>"),
             Command("type", r"^type( in)? (?P<arg>.+)$", self.type_into, help="type <text> into <field>"),
             # ---------- Day 4: files ----------
             Command("undo organise", r"^(undo|reverse)( the)? (organi[sz]ing|organi[sz]e|sorting|tidying)( of)?( my| the)? "
@@ -1005,8 +1004,6 @@ class Agent:
             return Result(False, "Say create a folder called, then its name.")
         kind = "folder" if m["kind"] == "folder" else "file"
         name, where = self._said(m["name"]), m["where"] or "desktop"
-        if not self.confirm(f"Should I create the {kind} {name} in {where}?"):
-            return Result(False, "Okay, I didn't create it.")
         return self._tool("create_item", called=name, kind=kind, where=where)
 
     def rename_item(self, said):
@@ -1017,8 +1014,6 @@ class Agent:
         if path is None:
             return files._missing(target)
         new_name = self._said(new_name)
-        if not self.confirm(f"Should I rename {os.path.basename(path)} to {new_name}?"):
-            return Result(False, "Okay, I left the name.")
         return self._tool("rename_item", target=path, new_name=new_name)
 
     def delete_item(self, said):
