@@ -215,7 +215,7 @@ def open_file(target: str):
       params={"called": "Its name", "kind": ("What to create", ["folder", "file"]),
               "where": "Folder: desktop, documents, downloads, ... or a full path (default desktop)",
               "text": "Text to put in a new file"},
-      level=CONTROLLED,
+      # Safe: undo removes it again (asking every time was too much, said Bilal)
       confirm_text=lambda a: f"create the {a.get('kind', 'folder')} {a['called']} in {a.get('where', 'desktop')}")
 def create_item(called: str, kind: str = "folder", where: str = "desktop", text: str = ""):
     return _files().create(called, kind, where, text)
@@ -224,7 +224,7 @@ def create_item(called: str, kind: str = "folder", where: str = "desktop", text:
 @tool("Rename a file or folder. A file keeps its extension when the new name has none.",
       params={"target": "Number from find_files, name, full path, or 'it' for the last one",
               "new_name": "The new name"},
-      level=CONTROLLED, confirm_text="rename {target} to {new_name}")
+      confirm_text="rename {target} to {new_name}")  # Safe: undo renames it back
 def rename_item(target: str, new_name: str):
     return _files().rename(target, new_name)
 
@@ -296,7 +296,8 @@ def ui_read():
 @tool("Click a button, menu, tab, link or checkbox in the window in front by its name, e.g. 'Save'. "
       "The name must match exactly one control (see ui_read).",
       params={"name": "The control's name", "window": _WINDOW},
-      level=CONTROLLED, confirm_text=lambda a: f"click {a['name']}" + (f" in {a['window']}" if a.get("window") else ""))
+      # Safe: a risky button (Delete, Send, Pay...) is still asked about right before the click
+      confirm_text=lambda a: f"click {a['name']}" + (f" in {a['window']}" if a.get("window") else ""))
 def ui_click(name: str, window: str = ""):
     # Delete / Send / Pay ... ask again right before, through the same confirm as everything else
     return _ui().click(name, window, confirm=_context.get("confirm"))
@@ -306,7 +307,7 @@ def ui_click(name: str, window: str = ""):
       "the field is kept (the new text goes in at the cursor).",
       params={"text": "What to type", "field": "The field's name; leave out for the window's only text field",
               "window": _WINDOW},
-      level=CONTROLLED,
+      # Safe: never in terminals or password fields, never over text you wrote, and ctrl+z takes it back
       confirm_text=lambda a: f"type '{a['text'][:40]}' into {a.get('field') or 'the text field'}"
                              + (f" in {a['window']}" if a.get("window") else ""))
 def ui_type(text: str, field: str = "", window: str = ""):
@@ -316,7 +317,8 @@ def ui_type(text: str, field: str = "", window: str = ""):
 @tool("Press an everyday key or shortcut in the window in front: enter, escape, tab, backspace, ctrl+s, ctrl+a, "
       "ctrl+c, ctrl+v, ctrl+z, ctrl+f, ctrl+n or ctrl+t. To clear a text box: ctrl+a, then backspace.",
       params={"keys": "The key or shortcut, e.g. 'ctrl+s'", "window": _WINDOW},
-      level=CONTROLLED, confirm_text=lambda a: f"press {a['keys']}" + (f" in {a['window']}" if a.get("window") else ""))
+      # Safe: everyday keys only, never in a terminal
+      confirm_text=lambda a: f"press {a['keys']}" + (f" in {a['window']}" if a.get("window") else ""))
 def ui_press_keys(keys: str, window: str = ""):
     return _ui().press_keys(keys, window)
 

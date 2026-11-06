@@ -560,6 +560,23 @@ def organise(where="downloads", now=None):
     return result
 
 
+def _remove_empty_folder(folder):
+    """Remove a folder Max made if it is empty. OneDrive marks new folders read-only, which makes
+    Windows refuse ("Access is denied"), so that mark is cleared first."""
+    import stat
+    try:
+        if os.listdir(folder):
+            return False
+        try:
+            os.rmdir(folder)
+        except PermissionError:
+            os.chmod(folder, stat.S_IWRITE)
+            os.rmdir(folder)
+        return True
+    except OSError:
+        return False
+
+
 def _write_log(data):
     ORGANISE_LOG_DIR.mkdir(parents=True, exist_ok=True)
     path = ORGANISE_LOG_DIR / f"{datetime.now().strftime('%Y%m%d-%H%M%S-%f')}.json"
@@ -608,10 +625,7 @@ def undo_organise(where="", log_path=None):
             failed += 1
             log.warning("Could not put back %s: %s", move["to"], e)
     for folder in reversed(data.get("created", [])):
-        try:
-            os.rmdir(folder)  # only the folders Max made, and only if empty now
-        except OSError:
-            pass
+        _remove_empty_folder(folder)  # only the folders Max made, and only if empty now
     if not failed:
         # Done: it won't be undone twice. With failures it stays, so asking again retries them
         os.replace(log_path, log_path.removesuffix(".json") + ".undone.json")

@@ -231,23 +231,22 @@ Commits: `b6699f2`, `8a92035`, `d2365b8` (the last three fixes are not committed
 ---
 
 ## Backlog (after Day 7, or on a day that finishes early)
-- **server-realm brain:** the old laptop already runs Ollama, Whisper and the Jarvis API, reached over the
-  Ethernet cable (`192.168.50.2`, Tailscale `100.109.31.1` as the fallback). No model runs on this laptop,
-  so the "no local model inference" rule still holds.
-  - `brain/ollama.py`: an `OllamaProvider` behind the same interface as Gemini (`BRAIN_PROVIDER: "ollama"`).
-    It uses a new `kova-cmd` model (qwen3 4B instruct with `num_ctx` 6144), so the Jarvis API keeps its own fast `jarvis-cmd`.
-    **Why a new model:** KOVA sends 50 tools (~3,600 tokens; about 66 after Day 4) and `jarvis-cmd` has
-    `num_ctx` 2048, so most of the tools would be cut off. Ollama also gets a shorter tool list
-    (`OLLAMA_TOOLS`, ~15 tools).
-  - Who answers what:
-    - **qwen** (`kova-cmd`) for commands and tool calls;
-    - **llama** (`jarvis-chat`) or the Jarvis API `/ask` for chat, weather, news and Wikipedia facts;
-    - **Gemini** for long plans, "why/how" questions and anything with a picture.
-    
-    If the server isn't reachable, Max falls back to Gemini.
-  - Optional: speech-to-text through Whisper (`:8001/transcribe`), so hearing works when the hostel DNS is down.
-  - Server rule: gentle tests, one model at a time (8 GB RAM; ~3.4 GB free with both models loaded).
-  - Measured 6 Nov: ~8–10 tokens/s, so the first step of a plan may take 20–40 s. Simple commands stay local and instant.
+- **KOVA server brain ✅ BUILT (6 Nov, after the Day 4 live test ran Gemini dry by 1 pm):**
+  - `brain/server.py`: the old laptop's Ollama with a new `kova-cmd` model (qwen3 4B instruct, `num_ctx` 6144,
+    `think` off), over the cable (`192.168.50.2`) with Tailscale (`100.109.31.1`) as the way round. No model
+    runs on this laptop, so the "no local model inference" rule still holds.
+  - `brain/hybrid.py`: **Gemini first, the KOVA server as the backup** (`BRAIN_PROVIDER: "gemini"`, the
+    default). When Gemini can't answer (daily quota, busy, no internet), the server answers for 10 minutes
+    before Gemini is tried again. `BRAIN_PROVIDER: "server"` = the server only; `SERVER_BRAIN: false` = Gemini only.
+  - The server gets 22 tools (`SERVER_TOOLS`), not all 66: every description is read with every request.
+  - Measured: ~45 tokens/s to read, ~6/s to write. The first answer after the model loads takes 60–90 s
+    (2,760 tokens of prompt + tools); after that ~9–10 s, because Ollama keeps what it read. So when
+    Gemini runs low (80 % of `GEMINI_DAILY_LIMIT`, or half its models out of quota), Max warms the server
+    up once in the background.
+  - The screen stays with Gemini (the server models can't see pictures).
+  - Not done, on purpose: the server's older news/weather API, because it loads a second 4B model next to
+    `kova-cmd` (8 GB RAM, Bilal's rule: don't slow either PC). Later: rename it to KOVA and let it use
+    `kova-cmd`.
 - Offline speech recognition (Whisper/Vosk) and an offline wake-word engine.
 - Camera input (only with clear activation).
 - GPU temperature monitoring (unreliable on Windows without vendor tools).

@@ -93,10 +93,11 @@ def test_hung_and_admin_windows(app):
 
 # ---------- clicking ----------
 
-def test_click_by_name_asks_first(app):
-    agent, asked = max_agent(True)
+def test_click_by_name_without_asking(app):
+    # Bilal: asking before every ordinary click (and typing) was too much
+    agent, asked = max_agent()
     assert agent.handle("click Save").message == "Clicked Save."
-    assert asked.questions == ["Click save in the window in front?"]
+    assert asked.questions == []
     assert app.did == [("click", "Save")]
 
 
@@ -127,18 +128,18 @@ def test_risky_names(name, word):
 
 def test_a_risky_click_asks_again_right_before(app):
     app.controls.append(Control("Delete", "button"))
-    agent, asked = max_agent(True, False)
+    agent, asked = max_agent(False)
     result = agent.handle("click delete")
-    assert asked.questions == ["Click delete in the window in front?", "Click Delete in notepad? It can't be undone."]
+    assert asked.questions == ["Click Delete in notepad? It can't be undone."]   # still asked
     assert result.message == "Okay, I didn't click Delete." and app.did == []
 
 
 def test_the_agents_risky_click_asks_again_too(app):
     app.controls.append(Control("Send", "button"))
     provider = FakeProvider([Reply(calls=[ToolCall("ui_click", {"name": "Send"})])])
-    agent, asked = max_agent(True, True, provider=provider)
+    agent, asked = max_agent(True, provider=provider)
     agent.handle("send the message please and then tell me")
-    assert asked.questions == ["Should I click Send?", "Click Send in notepad? It can't be undone."]
+    assert asked.questions == ["Click Send in notepad? It can't be undone."]
     assert app.did == [("click", "Send")]
 
 
@@ -290,7 +291,7 @@ def test_the_demo_save_to_desktop_plan(app, monkeypatch):
     assert result.success and result.message == "Saved it to your desktop."
     assert app.did == [("set", "Text Editor", "shopping list"), ("press", ["ctrl", "s"]),
                        ("replace", "File name:", path), ("click", "Save")]
-    assert len(asked.questions) == 4                     # one approval per round, nothing risky
+    assert asked.questions == []                         # typing, keys and an ordinary click don't ask
 
 
 def test_the_save_dialogs_file_name_is_replaced_but_other_text_is_kept(app):
@@ -326,7 +327,7 @@ def test_ui_tool_levels():
     from modules import tool_registry
     get = tool_registry.get
     assert get("ui_read").level == "safe"
-    assert get("ui_click").level == get("ui_type").level == get("ui_press_keys").level == "controlled"
+    assert get("ui_click").level == get("ui_type").level == get("ui_press_keys").level == "safe"
 
 
 def test_click_the_chat_by_its_name(app):
@@ -357,3 +358,17 @@ def test_search_in_steam():
     from desktop_agent import search_args
     assert search_args("titanfall 2 in steam") == {"query": "titanfall 2", "site": "steam"}
     assert search_args("steam for stardew valley") == {"query": "stardew valley", "site": "steam"}
+
+
+def test_a_kind_of_step_said_yes_to_once_isnt_asked_again_in_the_same_plan(app, monkeypatch):
+    from modules import system_control
+    closed = []
+    monkeypatch.setattr(system_control, "check_app", lambda name, must_be_running=False: (name, None))
+    monkeypatch.setattr(system_control, "close_app", lambda name, window="": closed.append(name) or
+                        __import__("modules.result", fromlist=["Result"]).Result(True, f"Closed {name}"))
+    monkeypatch.setattr(system_control, "app_memory_mb", lambda name: 0)
+    provider = FakeProvider([Reply(calls=[ToolCall("close_app", {"name": "discord"})]),
+                             Reply(calls=[ToolCall("close_app", {"name": "spotify"})])])
+    agent, asked = max_agent(True, provider=provider)
+    agent.handle("close discord and then close spotify too")
+    assert asked.questions == ["Should I close discord?"] and closed == ["discord", "spotify"]

@@ -22,6 +22,9 @@
     "mx"
   ],
   "AWAKE_TIMEOUT": 60,
-  "SPEECH_LANGUAGE": "en-US",
+  "SPEECH_LANGUAGES": ["en-US", "en-IN"],
+  "SERVER_BRAIN": true,
+  "SERVER_URLS": ["http://192.168.50.2:11434", "http://100.109.31.1:11434"],
+  "SERVER_MODEL": "kova-cmd",
   "VOICE": "female"
 }

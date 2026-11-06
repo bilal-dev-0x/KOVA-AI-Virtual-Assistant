@@ -21,7 +21,8 @@ def system_prompt(config):
         "no markdown, lists or emojis. "
         "Use tools for every action and every live fact (system figures, time, news, weather, prices). "
         "Never invent numbers; take them from tool results. "
-        "Only say you did something if its tool result is ok. If a tool fails or the user declines, "
+        "Only say you did something if its tool result is ok, and never say you will do something unless "
+        "you call its tool in the same reply. If a tool fails or the user declines, "
         "say so briefly and don't try the same thing again. "
         "Call several tools at once when the steps don't depend on each other. "
         "Approval for risky actions is handled for you, so don't ask for permission yourself. "
@@ -56,19 +57,25 @@ def _args_text(args):
     return ", ".join(f"{k}={v!r}" for k, v in (args or {}).items())
 
 
-def run_calls(calls, runner, confirm, trace, done=None):
+def run_calls(calls, runner, confirm, trace, done=None, approved_tools=None):
     """Run one batch of tool calls. Returns [(call, result_dict)] and the Results. done collects
-    what ran successfully. After a result that halts (the window changed), the rest is not run."""
+    what ran successfully. After a result that halts (the window changed), the rest is not run.
+    approved_tools: tools the user already said yes to in this plan; they aren't asked about again."""
     done = [] if done is None else done
+    approved_tools = set() if approved_tools is None else approved_tools
     permissions = runner.permissions
     prepared = [(call, *runner.prepare(call.name, call.args)) for call in calls]
 
-    # Whole-plan approval: every controlled step in this batch is approved with one question.
-    # Critical steps are asked about separately, right before they run.
-    batch = [tool.describe(args) for _, tool, args, problem in prepared
-             if problem is None and permissions.needs_approval(tool) and not permissions.asks_every_time(tool)]
+    # Whole-plan approval: every controlled step in this batch is approved with one question, and
+    # a kind of step said yes to once isn't asked about again in the same plan.
+    # Critical steps are asked about separately, right before each one runs.
+    asking = [(tool, args) for _, tool, args, problem in prepared
+              if problem is None and permissions.needs_approval(tool) and not permissions.asks_every_time(tool)
+              and tool.name not in approved_tools]
     # bool(): an answer that is neither yes nor no (None) must count as no, never as "not needed"
-    batch_approved = bool(confirm(_question(batch))) if batch else True
+    batch_approved = bool(confirm(_question([tool.describe(args) for tool, args in asking]))) if asking else True
+    if asking and batch_approved:
+        approved_tools.update(tool.name for tool, _ in asking)
 
     answers, results = [], []
     for call, tool, args, problem in prepared:
@@ -100,7 +107,7 @@ def run_calls(calls, runner, confirm, trace, done=None):
 
 def run(session, text, runner, confirm, trace=print, max_steps=MAX_STEPS):
     """Handle one request with the AI. Returns the final spoken Result."""
-    details, done = [], []
+    details, done, approved_tools = [], [], set()
     try:
         reply = session.send(text)
         steps = 0
@@ -113,7 +120,7 @@ def run(session, text, runner, confirm, trace=print, max_steps=MAX_STEPS):
             steps += 1
             if reply.text:
                 trace(f"  💭 {reply.text}")
-            answers, results = run_calls(reply.calls, runner, confirm, trace, done)
+            answers, results = run_calls(reply.calls, runner, confirm, trace, done, approved_tools)
             details += [r.detail for r in results if r.detail]
             halted = next((r for r in results if r.halt), None)
             if halted:

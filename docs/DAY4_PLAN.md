@@ -226,3 +226,6 @@ Downloads folder".
   - Worked: the screenshot quota check (~2 s), the approvals, Roman Urdu answers, game advice from the real RAM/GPU
   - Still to test once Gemini's daily quota is back: the Save As flow, multi-step plans
 - [x] Commit (Bilal: one commit for everything); push after his OK
+- [x] Fewer questions (Bilal: "har cheez pe na pooche"): typing, keys, ordinary clicks, create and rename no
+  longer ask (undo or ctrl+z takes them back); in one plan, a kind of step said yes to once isn't asked again.
+  Still asked: delete, closing apps, risky buttons (Delete/Send/Pay...), the AI's own screenshot, organising.
