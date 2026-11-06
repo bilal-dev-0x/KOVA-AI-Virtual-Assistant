@@ -10,29 +10,55 @@ from modules.result import Result
 
 MAX_STEPS = 6  # rounds of tool calls per request, so a confused plan can't run forever
 
-# "I've created the folder" with no create tool run: a small model once said so after doing nothing.
-# Each claim needs one of its tools to have worked in this request, or the answer isn't spoken.
+# "I've created the folder", "I'll set a reminder", "Closing the PowerShell terminal": the KOVA server's
+# small model said all of these in live tests without running any tool. Each claim needs one of its
+# tools to have worked in this request, or the answer isn't spoken.
+CLOSE = {"close_app", "close_window", "close_tab", "force_close", "end_process", "close_terminals"}
+OPEN = {"open_app", "open_file", "open_folder", "new_window", "open_web_search", "play_music", "open_start_menu",
+        "launch_game", "open_project"}
+MOVE = {"move_window", "side_by_side", "show_desktop"}
+# verb: (past, -ing, the tools that do it)
 CLAIMS = {
-    "created": {"create_item"}, "renamed": {"rename_item"},
-    "deleted": {"delete_items", "forget_memory", "forget_all_memories", "cancel_reminder"},
-    "closed": {"close_app", "close_window", "close_tab", "force_close", "end_process", "close_terminals"},
-    "opened": {"open_app", "open_file", "open_folder", "new_window", "open_web_search", "play_music",
-               "open_start_menu"},
-    "launched": {"open_app"}, "typed": {"ui_type"}, "written": {"ui_type", "create_item"},
-    "saved": {"ui_press_keys", "ui_click", "create_item", "remember"}, "clicked": {"ui_click"},
-    "muted": {"mute"}, "minimised": {"move_window", "show_desktop"}, "maximised": {"move_window"},
+    "create": ("created", "creating", {"create_item"}), "make": ("made", "making", {"create_item"}),
+    "rename": ("renamed", "renaming", {"rename_item"}),
+    "delete": ("deleted", "deleting", {"delete_items", "forget_memory", "forget_all_memories", "cancel_reminder"}),
+    "close": ("closed", "closing", CLOSE), "open": ("opened", "opening", OPEN),
+    "launch": ("launched", "launching", OPEN), "start": ("started", "starting", OPEN | {"run_tests", "gaming_mode"}),
+    "type": ("typed", "typing", {"ui_type"}), "write": ("written", "writing", {"ui_type", "create_item"}),
+    "save": ("saved", "saving", {"ui_press_keys", "ui_click", "create_item", "remember"}),
+    "click": ("clicked", "clicking", {"ui_click"}), "mute": ("muted", "muting", {"mute"}),
+    "minimise": ("minimised", "minimising", MOVE), "minimize": ("minimized", "minimizing", MOVE),
+    "maximise": ("maximised", "maximising", MOVE), "maximize": ("maximized", "maximizing", MOVE),
+    "move": ("moved", "moving", MOVE), "switch": ("switched", "switching", MOVE | {"set_power_plan", "set_voice"}),
+    "commit": ("committed", "committing", {"git_commit"}), "push": ("pushed", "pushing", {"git_push"}),
 }
-CLAIM = re.compile(r"\bI(?:'ve| have)\s+(?:just\s+|now\s+|also\s+|successfully\s+)?(" + "|".join(CLAIMS) + r")\b",
-                   re.IGNORECASE)
+_FORMS = {}
+for _verb, (_past, _ing, _tools) in CLAIMS.items():
+    for _form in (_verb, _past, _ing):
+        _FORMS[_form] = (_verb, _tools)
+_WORDS = "|".join(sorted(_FORMS, key=len, reverse=True))
+CLAIM = re.compile(
+    rf"\bI(?:'ve| have|'ll| will|'m going to| am going to|'m| am)\s+(?:just\s+|now\s+|also\s+|successfully\s+)?"
+    rf"(?P<said>{_WORDS})\b|(?:^|[.!?]\s+)(?P<lead>{_WORDS})\b", re.IGNORECASE)
+# "I've set a reminder" / "I'll set a timer for 6:30": only the reminder tool backs that
+SET_CLAIM = re.compile(r"\bI(?:'ve| have|'ll| will)\s+(?:just\s+|now\s+)?set\s+(?:a|an|the|your)\s+"
+                       r"(?:reminder|timer|alarm)", re.IGNORECASE)
 
 
 def unbacked_claim(text, succeeded):
-    """The first "I've <done>" in text that no successful tool backs up, or None."""
-    if re.search(r"\b(earlier|before|already)\b", text or "", re.IGNORECASE):
+    """The verb of the first "I've / I'll / I'm <doing>" in text that no successful tool backs up, or None."""
+    text = text or ""
+    if re.search(r"\b(earlier|before|already)\b", text, re.IGNORECASE):
         return None  # about something done in an earlier request
-    for match in CLAIM.finditer(text or ""):
-        if not CLAIMS[match[1].lower()] & succeeded:
-            return match[1].lower()
+    if SET_CLAIM.search(text) and "set_reminder" not in succeeded:
+        return "set"
+    for match in CLAIM.finditer(text):
+        word = (match["said"] or match["lead"]).lower()
+        if match["lead"] and not word.endswith("ing"):
+            continue  # "Open the app yourself" is advice, not a claim; "Closing the app" is a claim
+        verb, tools = _FORMS[word]
+        if not tools & succeeded:
+            return verb
     return None
 
 log = get_logger()
@@ -173,6 +199,7 @@ def run(session, text, runner, confirm, trace=print, max_steps=MAX_STEPS):
     if claim:
         log.warning("Answer not spoken: it says %r but no tool did that", claim)
         ran = f" What I did do: {', '.join(done)}." if done else ""
-        return Result(False, f"Sorry, I said I {claim} it, but I didn't actually manage to.{ran}",
+        return Result(False, f"Sorry, I said I'd {claim} it, but nothing actually did that.{ran} "
+                             "Please ask again, or say it a little differently.",
                       detail=f"The brain's answer was: {reply.text}")
     return Result(True, reply.text or "Done.", detail="\n".join(details))

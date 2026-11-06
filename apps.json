@@ -77,7 +77,7 @@
       "process": ["SystemSettings.exe"]
     },
     "terminal": {
-      "aliases": ["powershell", "windows terminal", "command line"],
+      "aliases": ["powershell", "windows powershell", "windows terminal", "command line", "command prompt", "cmd"],
       "launch": {"uri": "powershell.exe"}
     }
   },
