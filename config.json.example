@@ -27,5 +27,6 @@
   "SERVER_URLS": ["http://192.168.50.2:11434", "http://100.109.31.1:11434"],
   "SERVER_MODEL": "kova-cmd",
   "SERVER_CHAT_MODEL": "kova-chat",
+  "SPEECH_MIN_CONFIDENCE": 0.35,
   "VOICE": "female"
 }

@@ -57,7 +57,8 @@ REMEMBER_RAW = re.compile(r"\b(remember|don'?t forget|keep in mind)(\s+that)?[\s
 # Commands whose "it"/"that" is not the last app ("forget that" = the last fact,
 # "this week" is a period)
 OWN_PRONOUNS = {"forget", "activity", "activity apps", "activity songs", "snap window", "side by side",
-                "look at screen", "rename", "delete"}  # "rename it" / "delete it": the last file, not app
+                "look at screen", "rename", "delete",  # "rename it" / "delete it": the last file, not app
+                "open project", "open in vs code"}  # "open it in vs code": the last file
 # Their replies hold your facts, so the agent only hears that one ran
 MEMORY_COMMANDS = {"remember", "remember to", "list memories", "forget all", "forget", "recall"}
 # Memories added to an agent request: at most this many, and only good matches
@@ -88,7 +89,8 @@ STATUS_ONLY = re.compile(
 _SIDE = r"( window)?( on| to| at)?( the)? (?P<{}>left|right)( side| half)?"
 # "open chrome on the left and vs code on the right" is two actions for the agent, not an arrange
 # "maximize the vs code window at left and maximize the chrome window at right" (voice test) means the same
-_ARRANGE = r"((put|place|move|snap|arrange|align|aligned|shift|keep|set|maximi[sz]e|minimi[sz]e) )?"
+# "aligned to the chrome window to the left" (voice test): "to the" isn't part of the name
+_ARRANGE = r"((put|place|move|snap|arrange|align|aligned|shift|keep|set|maximi[sz]e|minimi[sz]e)( to)? )?"
 SIDE_BY_SIDE_BODY = (r"(?!(open|close|launch|start|run|kill|quit|exit|restart|play|search|find|delete)\b)"
                      r"(?:" + _ARRANGE + r"(?P<a>.+?)" + _SIDE.format("sa")
                      + r"( and| then)? " + _ARRANGE + r"(?P<b>.+?)" + _SIDE.format("sb")
@@ -106,6 +108,9 @@ LOOK_PHRASES = (
     rf"^(what|whats|what s|which|why|where|who|how much|how many)\b.*\b(this|that) {_SEEN}\b.*$"
     rf"|^what went wrong( (in|with) (this|that|the) {_SEEN})?$"
     r"|^what (colou?r|color) (is|are) (the|this|that) .+$"
+    # "tell me what is showing in the" (cut off), "read the text which is shown on the screen"
+    r"|^((can you )?tell me )?what( is|s| s)?( being)? (showing|shown|displayed|written)\b.*$"
+    r"|^read( out)?( me)?( the| this| that| all)? (text|words|screen|page|window)\b.*$"
     rf"|^(what is|whats|what s|what does)( this| that| the) {_SCREEN_THING}( say| mean| about)?( on (my|the) screen)?$"
     r"|^(what is|whats|what s) (on|in) (my|the|both|all)( my)? screens?$|^what am i looking at$"
     r"|^what does (this|that) say$|^(can you )?(see|look at|check|read) (my|the|both|all)( my| whole)? screens?$"
@@ -146,7 +151,11 @@ MISHEARD.update({"are alert song": "are alerts on", "are alerts song": "are aler
 MISHEARD_START = [(re.compile(r"^forgot\b"), "forget")]
 # Inside a sentence: "switch to ip performance", "what proteins do i have"
 MISHEARD_WORDS = [(re.compile(r"\b(ip|hi|hai) performance\b"), "high performance"),
-                  (re.compile(r"\b(proteins|routings)\b"), "routines")]
+                  (re.compile(r"\b(proteins|routings)\b"), "routines"),
+                  # "what about my rank", "now whats my rain usage", "meri raim" (voice test 6 Nov)
+                  (re.compile(r"\b(my|meri|mera) (rank|rain|raim|rams)\b"), r"\1 ram"),
+                  (re.compile(r"\b(rank|rain|raim) (usage|use|status)\b"), r"ram \2"),
+                  (re.compile(r"\bright client\b"), "riot client")]
 
 
 def fix_misheard(text):
@@ -221,6 +230,16 @@ def normalize(text, wake_words=("kova",)):
 
     text = re.sub(r" please$", "", text)
     return _collapse_repeat(_join_spelled(text.strip()))
+
+
+def spelled_words(raw_text):
+    """The names spelled out letter by letter in what was said: 'c l a u d e' -> ['claude']."""
+    text = re.sub(r"[^\w\s]", " ", (raw_text or "").lower())
+    return [m.replace(" ", "") for m in re.findall(r"\b[a-z](?: [a-z]\b){2,}", text)]
+
+
+BROWSER_KEYS = {"chrome.exe": "chrome", "msedge.exe": "edge", "brave.exe": "brave"}
+FRONT_WINDOW = re.compile(r"((the|this|that|current|front|active|open) )?windows?( in front)?")
 
 
 def _join_spelled(text):
@@ -433,8 +452,18 @@ class Agent:
                     self.sleep, help="go to sleep (voice mode)"),
             Command("help", r"^(help|what can you do|list commands|show commands|commands)$",
                     self.help, help="help"),
-            Command("greet", r"^(hello|hi|hey|good (morning|afternoon|evening))( there)?$",
+            Command("greet", r"^(?=.)((hello|hi|hey|good (morning|afternoon|evening)|salam|assalam ?o? ?alaikum|aoa)( there)? ?)?"
+                             r"((how are you|how r u|how are you doing|hows it going|how is it going|kaise ho|kese ho"
+                             r"|kaisay ho|kaise hain|kya haal hai|kia haal hai|kya hal hai)( tum| aap| ap| bhai| yaar)?)?$",
                     self.greet),
+            # Which brain answers: Gemini, or the KOVA server's two models
+            Command("brain", r"\b(which|what)( is)?( your)? (model|brain|ai|llm)( name| are you| do you use"
+                             r"| are you using| is answering| is this)?$|^what (model|brain|ai) are you( using)?$",
+                    self.brain_info, help="which brain are you using"),
+            # "which window is in front", "are you in the valorant window"
+            Command("front window", r"^(which|what) (window|app) is (in front|open in front|active|focused|on top)$"
+                                    r"|^(are you|am i) in( the)? (?P<arg>.+?) window$",
+                    self.front_window, help="which window is in front"),
             Command("undo", r"^(undo|undo (that|it|this|them|the last (thing|action|one))|take (that|it) back|reverse that)$"
                             r"|^undo (the |my )?(alerts?|power plan|music|song|voice|volume|reminder|memory|change)$",
                     lambda arg: self.runner.undo_last(), help="undo"),
@@ -490,7 +519,12 @@ class Agent:
                     lambda arg: tool("list_running_apps"), help="list apps"),
             Command("top cpu", r"\b(top|heaviest|biggest) (processes|programs|apps) by cpu\b|\bwhat is using (my |the )?(cpu|processor)\b",
                     lambda arg: tool("top_processes", sort_by="cpu")),
-            Command("top processes", r"\b(top|heaviest|biggest) (processes|programs|apps)\b|\bwhat is using (my |the )?(ram|memory)\b",
+            # "what is consuming my ram", "which app is most using my laptop", "meri ram zyada kaun istemal kar raha hai"
+            Command("top processes", r"\b(top|heaviest|biggest) (processes|programs|apps)\b"
+                                     r"|\b(what|which)( app| apps| program| programs| process| processes)?( is| are|s)?"
+                                     r"( most)? (using|consuming|eating|taking)( up)?( the most| most)?( of)?"
+                                     r"( my| the)? (ram|memory|laptop|pc|computer|resources)\b"
+                                     r"|\b(ram|raim|memory)\b.*\bkaun\b|\bkaun\b.*\b(ram|raim|memory)\b",
                     lambda arg: tool("top_processes"), help="top processes / what is using my ram"),
             Command("new tab", r"^(open )?(a )?(new )?tab( in (the )?(google|chrome|google chrome|browser)( window)?)?$",
                     lambda arg: tool("open_app", name="google"), help="open a new tab"),
@@ -510,6 +544,19 @@ class Agent:
                                   r"( (of|in|for))?( (?P<arg>.+))?$|^open (?P<arg2>.+?) in a new window$",
                     lambda arg: tool("new_window", name=arg), help="new window of <app>",
                     ask_text="New window of what?"),
+            # "open it in vs code", "open first code dot asm in vs code" (voice test: it opened in Explorer);
+            # "open visora in vs code" is the project command below
+            Command("open in vs code", r"^(show|edit)( up)? (?P<arg>.+?) (in|with|using) (vs ?code|visual studio code"
+                                       r"|code editor|code)$|^open( up)? (?P<arg2>.+?) (with|using) (vs ?code"
+                                       r"|visual studio code|code editor|code)$|^open( up)? (?P<arg3>.+?) in (visual studio"
+                                       r" code|code editor|ps4 vs4|vs 4|v s code)$",
+                    self.open_in_code, help="open <file or folder> in vs code"),
+            # "open the whatsapp tab in the existing chrome window", "switch to the gmail tab"
+            Command("switch tab", r"^(switch|go|change|move) to( the| my)? (?P<arg>.+?) tab( in( the)?( existing| open)?"
+                                  r"( chrome| edge| brave| browser)( window)?)?$"
+                                  r"|^(open|show)( the| my)? (?P<arg2>.+?) tab in( the)?( existing| open)?"
+                                  r"( chrome| edge| brave| browser)( window)?$",
+                    lambda arg: tool("switch_tab", name=arg), help="switch to the <name> tab"),
             # After "find my cv": "open the second one"
             Command("open found", r"^open( up)?( the| number)? (?P<arg>first|second|third|fourth|fifth|last|1st|2nd|3rd"
                                   r"|4th|5th|one|two|three|four|five|[1-5])( one| file| result| folder)?$",
@@ -524,8 +571,7 @@ class Agent:
                     lambda arg: tool("list_projects"), help="what projects do I have"),
             Command("open project", r"^open( up)?( my| the)? (?P<arg>.+? )?(project|repo|repository)( in (vs )?code)?$"
                                     r"|^open (?P<arg2>.+?) in (vs )?code$",
-                    lambda arg: tool("open_project", **({"name": arg} if arg else {})),
-                    help="open my kova project (VS Code)"),
+                    self.open_in_code, help="open my kova project (VS Code)"),
             Command("run tests", r"^(run|check)( the| all)?( my)? tests?( of| for| in)?( (?P<arg>.+?))?$"
                                  r"|^(run|check|test)( the)? (?P<arg2>.+?)(s)? tests$|^test (?P<arg3>.+?)( project)?$",
                     lambda arg: tool("run_tests", **({"name": arg} if arg else {})), help="run kova's tests"),
@@ -549,8 +595,9 @@ class Agent:
             Command("list games", r"^(which|what) games (are installed|do i have|are on my (pc|computer|laptop)|can i play)"
                                   r"( on my (pc|computer|laptop))?$|^(list|show)( me)?( all)?( my| the)? games$|^my games$",
                     lambda arg: tool("list_games"), help="which games do I have"),
-            Command("gaming mode", r"^((start|turn on|switch on|enable|activate|go into|enter) )?(the )?(gaming|game) mode"
-                                   r"( on)?$|^(lets|let s) (game|play some games)$",
+            # Anything in front ("govind gaming mode" was "go into gaming mode"), unless it turns it off
+            Command("gaming mode", r"^(?!.*\b(off|stop|end|exit|disable|done|finished)\b)(.* )?(gaming|game) mode( on)?$"
+                                   r"|^(lets|let s) (game|play some games)$",
                     lambda arg: tool("gaming_mode"), help="gaming mode / done gaming"),
             Command("done gaming", r"^(done|finished|stop|end) gaming$|^((turn off|stop|end|exit|disable) )?(the )?"
                                    r"(gaming|game) mode( off)?$",
@@ -755,6 +802,9 @@ class Agent:
     def handle(self, raw_text):
         self.raw_text = raw_text
         text = fix_misheard(self.normalize(raw_text))
+        # "no minimise the cloud window": a correction in front of a command (only when the rest is one)
+        if re.match(r"^no \w+ \w+", text) and self.match(text[3:])[0] is not None:
+            text = text[3:]
         log.info("Input: %s", text)
 
         if not text:
@@ -797,6 +847,14 @@ class Agent:
                 and not STATUS_QUESTION.match(text)):
             # "yah meri gpu per sahi chal jaenge na" asks about games, it doesn't want a GPU report
             return self._ask_agent(raw_text)
+
+        # "minimise the lord window c l a u d e": the name spelled out is the name
+        spelled = next((w for w in spelled_words(raw_text) if arg and w in arg.split()), None)
+        if spelled:
+            arg = spelled
+        # "close the windows" / "close this window": the window in front, not Windows Settings
+        if command.name == "close" and FRONT_WINDOW.fullmatch(arg or ""):
+            return self.close_front_window()
 
         if command.name in OWN_PRONOUNS:
             pass
@@ -956,19 +1014,39 @@ class Agent:
         if system_control._resolve_app(arg)[0] == "terminal":
             return "terminal", None  # closed window by window in handle(), never Max's own
         key, problem = system_control.check_app(arg, must_be_running=True)
-        if problem and (problem.message.startswith("I don't know") or " is a website" in problem.message):
+        # Unknown, a website, or a Start menu app Max can't see running ("close youtube desktop":
+        # a web app in a chrome.exe window titled "YouTube"): look for its window instead
+        if problem and (problem.message.startswith("I don't know") or " is a website" in problem.message
+                        or "can't find" in problem.message):
             found = system_control.window_titled(arg)
             if found:
                 log.info("Close %r means the %s window %r", arg, *found)
                 self.closing_title = found
                 return found[0], None
             # Any other open window, by its program or title: "close wps photos", "close pic png"
-            hwnd, app, title = windows.find(arg)
-            if hwnd is not None:
+            for said in dict.fromkeys([arg, re.sub(r"\s*\b(desktop|app|application)\b", "", arg).strip()]):
+                hwnd, app, title = windows.find(said) if said else (None, None, None)
+                if hwnd is None:
+                    continue
+                browser = BROWSER_KEYS.get(windows.process_of(hwnd))
+                if browser:  # a tab or a web app: Ctrl+W on it, never the whole browser
+                    log.info("Close %r means the %s window %r", arg, browser, title)
+                    self.closing_title = (browser, title)
+                    return browser, None
                 log.info("Close %r means the window %r of %s", arg, title, app)
-                self.closing_window = (arg, app, title)
-                return arg, None
+                self.closing_window = (said, app, title)
+                return said, None
         return key, problem
+
+    def close_front_window(self):
+        """'close the window': the one you're looking at (not Max's terminal)."""
+        found = windows.target_window()
+        if found is None:
+            return Result(False, "I can't see a window to close.")
+        hwnd, app, title = found
+        if not self.confirm(f"Close the {app} window {system_control.spoken_title(title)}?"):
+            return Result(False, "Okay, cancelled.")
+        return windows.close_hwnd(hwnd, app, title)
 
     def open_folder(self, said):
         """'project folder' -> the folder your memory says; 'd drive coding arc' -> D:\\Coding Arc."""
@@ -1364,7 +1442,57 @@ class Agent:
         return Result(True, message, detail=detail)
 
     def greet(self, arg):
+        # Voice test: the server's small model heard "kaise ho tum" as "how do you run"
+        text = self.normalize(self.raw_text or "")
+        if re.search(r"\b(kaise|kese|kaisay|haal|hal)\b", text):
+            return Result(True, f"Main theek hoon {self.title}, aap sunao? Batao kya karna hai.")
+        if re.search(r"\bhow\b", text):
+            return Result(True, f"I'm doing well, {self.title}. What can I do for you?")
         return Result(True, f"Hi {self.title}, how are you?")
+
+    def brain_info(self, arg):
+        """Which brain answers right now, said plainly."""
+        provider = self.provider
+        if provider is None:
+            return Result(True, "I have no AI brain set up, so only my own commands work.")
+        primary = getattr(provider, "primary", None)
+        backup = getattr(provider, "backup", provider if provider.name == "server" else None)
+        server = ""
+        if backup is not None and getattr(backup, "model", None):
+            chat = getattr(backup, "chat_model", "")
+            server = (f"the KOVA server ({chat} for talk, {backup.model} for commands)" if chat
+                      else f"the KOVA server's {backup.model}")
+        if primary is not None:
+            if provider.primary_ok():
+                return Result(True, f"Gemini answers right now, and {server} is the backup.")
+            return Result(True, f"Gemini is resting for now, so {server} answers.")
+        if server:
+            return Result(True, f"{server[0].upper()}{server[1:]} answers.")
+        return Result(True, f"My brain is {provider.name}.")
+
+    def open_in_code(self, name):
+        """A project in VS Code; any other file or folder ("it", "first code dot asm") too."""
+        if not name:
+            return self._tool("open_project")  # the last project used
+        if not re.fullmatch(r"(it|that|this|them)( file| folder)?", name):
+            from modules import dev
+            dev.configure(self.config)
+            if dev.find_project(name) is not None:
+                return self._tool("open_project", name=name)
+        return self._tool("open_in_vscode", target=self._said(name))
+
+    def front_window(self, name):
+        found = windows.target_window()
+        if found is None:
+            return Result(True, "I can't see any window in front.")
+        _, app, title = found
+        shown = f"{app}, {system_control.spoken_title(title)}" if title else app
+        if name:
+            words = system_control.title_words(name)
+            if system_control.title_has(f"{app} {title}", words):
+                return Result(True, f"Yes, {shown} is in front.")
+            return Result(True, f"No, {shown} is in front.")
+        return Result(True, f"{shown} is in front.")
 
     def reminder(self, text):
         parsed = parse_reminder(text)

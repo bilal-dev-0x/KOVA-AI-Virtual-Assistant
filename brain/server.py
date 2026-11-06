@@ -31,17 +31,26 @@ DEFAULT_TOOLS = ["open_app", "close_app", "close_window", "close_tab", "open_fol
                  "list_games", "launch_game", "open_project", "git_status",
                  # missing in the voice test: "which apps are open", "what reminders do I have", "close powershell"
                  "list_running_apps", "open_windows", "list_reminders", "cancel_reminder", "side_by_side",
-                 "close_terminals", "look_at_screen"]
+                 "close_terminals", "look_at_screen",
+                 # voice test of 6 Nov night: "gaming mode", "GPU status", "open it in VS Code", "the WhatsApp tab"
+                 "gaming_mode", "done_gaming", "gpu_usage", "open_in_vscode", "switch_tab"]
 
 # The small model made things up in live tests ("I see the Valorant window", "I'll set a reminder"
 # with no tool, "I can't move windows" while it could). These rules are added to its system prompt.
 SERVER_RULES = (
     " Rules for you: you cannot see the screen or any window; never describe one unless a tool told you "
     "what is in it (look_at_screen reads its text for you). To do something, call its tool now, in this "
-    "reply; never answer 'I will do it' or 'done' without the tool. You can open, close, move and list apps and windows, set and list reminders, "
-    "find files and type in the window in front: use those tools instead of saying you can't. If no tool "
-    "fits, say in one short sentence that you can't do that yet."
+    "reply; never answer 'I will do it' or 'done' without the tool. You can open, close, move and list apps "
+    "and windows, read and click inside the window in front, set and list reminders, find files, show what "
+    "uses the RAM and CPU, and type in the window in front: use those tools instead of saying you can't. If "
+    "no tool fits, say in one short sentence that you can't do that yet."
 )
+# kova-cmd said "I can't" five times in a row in the voice test while it had the tool: after one
+# refusal it copies itself. Then the request is asked once more, alone, with this note.
+REFUSAL = re.compile(r"\b(I (can't|cannot|can not|am unable to|am not able to|don't have)|unable to|no access|"
+                     r"don't have access)\b", re.IGNORECASE)
+RETRY_NOTE = ("(You do have tools for this, listed with this request: call the one that fits now instead of "
+              "saying you can't.)")
 # A question about the screen, asked with the text OCR read from it
 READ_PROMPT = (
     "Answer a question about the user's screen. You can't see it: below is the text Windows OCR read from a "
@@ -70,11 +79,13 @@ DEFAULT_CHAT_MODEL = "kova-chat"
 # "main tool_joke tell karta hoon" (live test)
 CHAT_PROMPT = (
     "You are {name}, a friendly assistant on the user's Windows PC. Call the user '{title}'. Your replies are "
-    "spoken aloud: one to three short sentences, plain text, no lists or markdown. Reply in the user's "
-    "language: English to English, Roman Urdu to Roman Urdu. Answer questions, explain things and give advice "
-    "yourself. You can't do anything on the PC in this chat. Only if the user asks you to do something on the "
-    "PC, or asks for a live fact (the time, date, weather, news, prices, system figures, files, apps, "
-    "reminders, the screen), answer exactly: I need my tools for that. Never talk about tools otherwise."
+    "spoken aloud: one to three short sentences, plain text, no lists or markdown. Reply in the language of "
+    "the user's latest message: English to English; Roman Urdu to Roman Urdu with Urdu words (theek, zyada, "
+    "farq, dono), never Hindi words (adhik, antar, upyog). Answer questions, explain things and give advice "
+    "yourself. You can't do anything on the PC in this chat, and you can't see the screen: never say what is "
+    "on it or in a window. Only if the user asks you to do something on the PC, or asks for a live fact (the "
+    "time, date, weather, news, prices, system figures, files, apps, windows, reminders, the screen), answer "
+    "exactly: I need my tools for that. Never talk about tools otherwise."
 )
 
 
@@ -90,11 +101,23 @@ ACTION = re.compile(
     r"search|google|find|look|screen|window|volume|mute|unmute|shut ?down|restart|reboot|sleep|lock|kill|"
     r"install|commit|push|send|organi[sz]e|undo|cancel|switch|turn|show|list|check|time|date|today|tomorrow|"
     r"weather|news|price|cpu|ram|gpu|disk|battery|memory|running|apps?|games?|projects?|tests?|remember|"
-    r"recall|forget|download|upload|copy|paste|save|tab|folder|files?|brightness|wifi|bluetooth)\b",
+    r"recall|forget|download|upload|copy|paste|save|tabs?|folder|files?|brightness|wifi|bluetooth|"
+    # about the screen (voice test: "read the text..." went to kova-chat, which made up a Wikipedia page)
+    r"read|see|seeing|showing|shown|display|displayed|text|page|chrome|edge|browser|youtube|explorer|"
+    r"notepad|vs ?code|valorant|riot|steam|discord|whatsapp|front|consuming|using)\b",
     re.IGNORECASE)
 # kova-chat asking for kova-cmd (live: it also wrote "TOOLS python, virtualenv" for an explanation)
 NEEDS_TOOL = re.compile(r"\bneed my tools\b|^\W*tools\b|\btool_\w+|\b(I (can't|cannot|can not|am unable to|don't have)|"
-                        r"unable to|no access|don't have access)\b", re.IGNORECASE)
+                        r"unable to|no access|don't have access)\b"
+                        # talk about the screen it can't see ("the Wikipedia page that's open in the Chrome window")
+                        r"|\b(in (the|your) \w+( \w+)? window|on (the|your) screen|(page|tab|window) (that's|that is|is) "
+                        r"open)\b", re.IGNORECASE)
+# Max's note of local commands is for kova-cmd; it confused kova-chat ("tell me about python venv" got an
+# answer about the failed "lord window claude" from the note)
+ROMAN_URDU = re.compile(r"\b(hai|hain|kya|kia|karun|karoon|kaise|kese|mera|meri|mere|yaar|yar|nahi|nahin|tum|aap|"
+                        r"kar|raha|rahi|ki|ka|ko|se|mein|bhi|kyun|kab|kahan|batao|bata|samjhao|acha|theek|hota|"
+                        r"hoti|jata|chahiye|wala|wali|bohat|bahut|zyada|jyada|kaun|konsa|konsi)\b", re.IGNORECASE)
+LOCAL_NOTE = re.compile(r"^\(Commands the user ran without you[^\n]*\n?", re.MULTILINE)
 
 log = get_logger()
 
@@ -249,8 +272,14 @@ class ServerSession(Session):
     def _talk(self):
         """kova-chat's answer, or None when kova-cmd should answer (it needs a tool, or isn't there)."""
         from modules.agent_loop import unbacked_claim
-        history = [{"role": m["role"], "content": m["content"]} for m in self.messages
+        history = [{"role": m["role"], "content": LOCAL_NOTE.sub("", m["content"])} for m in self.messages
                    if m["role"] in ("user", "assistant") and m.get("content")]
+        if history and history[-1]["role"] == "user":
+            # It follows the language of earlier turns, not the prompt (live: an English question after a
+            # Roman Urdu one got "I7 adhik power ka upyog karta hai"), so the latest message says which
+            latest = history[-1]["content"]
+            language = "Roman Urdu (Urdu words, not Hindi)" if ROMAN_URDU.search(latest) else "English"
+            history[-1] = {"role": "user", "content": f"{latest}\n(Reply in {language}.)"}
         try:
             message = self.provider.chat([{"role": "system", "content": self.chat_prompt}] + history, [],
                                          model=self.provider.chat_model)
@@ -287,7 +316,12 @@ class ServerSession(Session):
             answer = self._talk()
             if answer:
                 return Reply(text=answer)
-        return self._ask()
+        reply = self._ask()
+        if not reply.calls and REFUSAL.search(reply.text or ""):
+            log.info("kova-cmd said it can't, with tools at hand: asked once more on its own")
+            self.messages = [{"role": "user", "content": f"{text}\n{RETRY_NOTE}"}]
+            reply = self._ask()
+        return reply
 
     def send_results(self, results):
         for call, result in results:

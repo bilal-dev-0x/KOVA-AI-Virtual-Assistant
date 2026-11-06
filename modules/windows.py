@@ -216,6 +216,16 @@ def close_window(name, wait_seconds=3):
     hwnd, app, title = find(name)
     if hwnd is None:
         return title  # the Result explaining why
+    return close_hwnd(hwnd, app, title, wait_seconds)
+
+
+def process_of(hwnd):
+    """The program of an open window ('chrome.exe'), lowercased, or ''."""
+    return next((process.lower() for h, process, _ in visible_windows() if h == hwnd), "")
+
+
+def close_hwnd(hwnd, app, title, wait_seconds=3):
+    """Click X on this window; never a terminal or Max's own."""
     from modules import ui_automation
     if hwnd in _own_windows() or ui_automation._is_terminal(hwnd):
         return Result(False, "That's a terminal window. Say close terminal, and I'll close the others safely.")

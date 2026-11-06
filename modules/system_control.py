@@ -131,7 +131,9 @@ def check_app(name, must_be_running=False):
 
     kind, key, entry = target
     if kind == "website":
-        return None, Result(False, f"{key} is a website. I can't close browser tabs yet.")
+        # " is a website" is how the close command knows to look for the tab instead
+        return None, Result(False, f"{key} is a website, and I can't see a {key} tab in a browser. "
+                                   f"Switch to that tab and say close the tab.")
     if entry.get("start_menu") and not entry.get("process"):
         if must_be_running:
             return None, Result(False, f"I can't find {key} running, so I can't close it. "
@@ -457,6 +459,50 @@ def _press_ctrl_w():
     user32.keybd_event(0x57, 0, 0, 0)  # W
     user32.keybd_event(0x57, 0, 2, 0)
     user32.keybd_event(0x11, 0, 2, 0)  # Ctrl up
+
+
+def _press_ctrl_tab():
+    import ctypes
+    user32 = ctypes.windll.user32
+    user32.keybd_event(0x11, 0, 0, 0)  # Ctrl down
+    user32.keybd_event(0x09, 0, 0, 0)  # Tab
+    user32.keybd_event(0x09, 0, 2, 0)
+    user32.keybd_event(0x11, 0, 2, 0)  # Ctrl up
+
+
+MAX_TAB_STEPS = 30
+
+
+def switch_tab(query, step_seconds=0.25):
+    """Show the open browser tab whose title has query's words. A browser window's title is the
+    tab in front, so Max brings each browser window forward and steps through its tabs with
+    Ctrl+Tab until that title shows (voice test: "open the WhatsApp tab in the existing Chrome window")."""
+    words = [w for w in title_words(query) if len(w) > 1 and w not in ("tab", "chrome", "edge", "brave", "browser")]
+    if not words:
+        return Result(False, "Which tab should I show?")
+    shown = " ".join(words)
+    browser_windows = app_windows(sorted(BROWSER_PROCESSES))
+    if not browser_windows:
+        return Result(False, "I can't see a browser window.")
+    for hwnd, title in browser_windows:
+        if title_has(title, words):
+            if not _bring_to_front(hwnd):
+                return Result(False, f"Windows didn't let me bring the {shown} tab to the front.")
+            return Result(True, f"Here's the {spoken_title(title)} tab.")
+    for hwnd, first_title in browser_windows:
+        if not _bring_to_front(hwnd):
+            continue
+        steps = min(_tab_count(hwnd) or MAX_TAB_STEPS, MAX_TAB_STEPS)
+        for _ in range(steps):
+            _press_ctrl_tab()
+            time.sleep(step_seconds)
+            title = _window_title(hwnd) or ""
+            if title_has(title, words):
+                log.info("Switched to tab %s", title)
+                return Result(True, f"Here's the {spoken_title(title)} tab.")
+            if title == first_title:
+                break  # round once: back at the tab it started on
+    return Result(False, f"I can't find a {shown} tab in your browser.")
 
 
 def _window_title(hwnd):
