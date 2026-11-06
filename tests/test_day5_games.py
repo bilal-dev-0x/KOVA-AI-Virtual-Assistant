@@ -146,3 +146,16 @@ def test_no_high_performance_plan(mode, monkeypatch):
 ])
 def test_game_phrases(said, command):
     assert Agent(dict(CONFIG)).match(said)[0].name == command
+
+
+def test_steam_quits_its_own_way(monkeypatch):
+    # Voice test: "close steam" clicked X, Steam only hid in the tray, and Max said "still open"
+    import os
+    started, running = [], [True]
+    monkeypatch.setattr(system_control, "_resolve_app",
+                        lambda name: ("steam", {"process": ["steam.exe"], "quit": {"uri": "steam://exit"}}))
+    monkeypatch.setattr(system_control, "_is_running", lambda entry, names=None: running[0])
+    monkeypatch.setattr(system_control.os, "startfile",
+                        lambda uri: started.append(uri) or running.__setitem__(0, False), raising=False)
+    result = system_control.close_app("steam")
+    assert result.success and started == ["steam://exit"]

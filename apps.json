@@ -38,6 +38,7 @@
     "steam": {
       "aliases": [],
       "launch": {"uri": "steam://open/main"},
+      "quit": {"uri": "steam://exit"},
       "process": ["steam.exe"]
     },
     "vlc": {

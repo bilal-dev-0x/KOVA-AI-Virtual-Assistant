@@ -512,6 +512,20 @@ def _tab_count(hwnd):
         return None
 
 
+def _quit_with(key, entry, procs, wait_seconds):
+    """Ask an app to quit its own way (apps.json "quit": {"uri": ...}) and wait for it to go."""
+    os.startfile(entry["quit"]["uri"])
+    deadline = time.time() + wait_seconds
+    while time.time() < deadline:
+        if not _is_running(entry):
+            log.info("Closed %s with its own quit", key)
+            return Result(True, f"Closed {key}")
+        time.sleep(0.5)
+    if _needs_admin(procs):
+        return Result(False, ADMIN_MESSAGE.format(key))
+    return Result(False, f"{key} is still closing. Give it a moment, or say force close {key}.")
+
+
 def close_app(name, window="", wait_seconds=5):
     """Close an app gently, or only its window whose title contains window."""
     key, entry = _resolve_app(name)
@@ -535,6 +549,10 @@ def close_app(name, window="", wait_seconds=5):
                 return Result(True, f"Closed the {key} window {window}")
             time.sleep(0.5)
         return Result(False, f"That {key} window is still open. It may be asking you to save something.")
+
+    if entry.get("quit"):
+        # Its own way out (Steam: steam://exit): clicking X only hides it in the tray
+        return _quit_with(key, entry, procs, wait_seconds=max(wait_seconds, 12))
 
     had_windows = bool(app_windows(procs))
     # taskkill without /F asks the app to close normally, like clicking X,
