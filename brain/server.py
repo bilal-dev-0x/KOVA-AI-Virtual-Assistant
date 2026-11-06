@@ -26,7 +26,20 @@ DEFAULT_TOOLS = ["open_app", "close_app", "close_window", "close_tab", "open_fol
                  "top_processes", "health_report", "set_reminder", "play_music", "play_pause", "volume_up",
                  "volume_down", "get_datetime", "remember", "recall", "find_files", "open_file", "create_item",
                  "rename_item", "delete_items", "move_window", "ui_read", "ui_click", "ui_type", "ui_press_keys",
-                 "list_games", "launch_game", "open_project", "git_status"]
+                 "list_games", "launch_game", "open_project", "git_status",
+                 # missing in the voice test: "which apps are open", "what reminders do I have", "close powershell"
+                 "list_running_apps", "open_windows", "list_reminders", "cancel_reminder", "side_by_side",
+                 "close_terminals"]
+
+# The small model made things up in live tests ("I see the Valorant window", "I'll set a reminder"
+# with no tool, "I can't move windows" while it could). These rules are added to its system prompt.
+SERVER_RULES = (
+    " Rules for you: you cannot see the screen or any window; never describe one unless a tool told you "
+    "what is in it. To do something, call its tool now, in this reply; never answer 'I will do it' or "
+    "'done' without the tool. You can open, close, move and list apps and windows, set and list reminders, "
+    "find files and type in the window in front: use those tools instead of saying you can't. If no tool "
+    "fits, say in one short sentence that you can't do that yet."
+)
 
 log = get_logger()
 
@@ -43,13 +56,13 @@ class ServerProvider(Provider):
 
     def session(self, system_prompt, tools):
         wanted = set(self.tool_names)
-        return ServerSession(self, system_prompt, [t for t in tools if t.name in wanted])
+        return ServerSession(self, system_prompt + SERVER_RULES, [t for t in tools if t.name in wanted])
 
     def warm_up(self, system_prompt, tools):
         """Load the model and have it read the system prompt and tools, writing a single token.
         Ollama keeps what it read, so the next real request starts from there."""
         session = self.session(system_prompt, tools)
-        self.chat([{"role": "system", "content": system_prompt}], session.tools, options={"num_predict": 1})
+        self.chat([{"role": "system", "content": session.system_prompt}], session.tools, options={"num_predict": 1})
 
     def chat(self, messages, tools, options=None):
         """One /api/chat request. Tries the address that worked last, then the others."""

@@ -61,9 +61,9 @@ def test_the_server_can_create_rename_and_delete():
 
 
 @pytest.mark.parametrize("text, succeeded, claim", [
-    ("I've created a folder called KOVA Live Test on your desktop.", set(), "created"),
+    ("I've created a folder called KOVA Live Test on your desktop.", set(), "create"),
     ("I've created a folder called KOVA Live Test on your desktop.", {"create_item"}, None),
-    ("I have closed Chrome for you.", {"open_app"}, "closed"),
+    ("I have closed Chrome for you.", {"open_app"}, "close"),
     ("I already opened Notepad earlier.", set(), None),
     ("Your RAM is at 94 percent.", set(), None),
 ])
@@ -77,5 +77,18 @@ def test_an_answer_claiming_work_that_never_ran_isnt_spoken():
                              Reply(text="I've created a folder called KOVA Live Test on your desktop.")])
     result = Agent(dict(CONFIG), provider=provider).handle("make me a kova test folder on the desktop and tell me")
     assert not result.success
-    assert result.message.startswith("Sorry, I said I created it, but I didn't actually manage to.")
+    assert result.message.startswith("Sorry, I said I'd create it, but nothing actually did that.")
     assert "What I did do: tell you the time" in result.message
+
+
+@pytest.mark.parametrize("text, succeeded, claim", [
+    # said by the KOVA server in the voice test, with no tool run
+    ("I'll set a reminder for 6:30 PM.", set(), "set"),
+    ("I'm coming out of VS Code now. Closing the PowerShell window.", set(), "close"),
+    ("I see. I've closed the PowerShell terminal as you requested.", set(), "close"),
+    ("I've set a reminder for 6:20 PM.", {"set_reminder"}, None),
+    ("Open File Explorer yourself to check.", set(), None),          # advice, not a claim
+    ("VALORANT has launched. I'm now in the game.", {"launch_game"}, None),
+])
+def test_more_unbacked_claims(text, succeeded, claim):
+    assert agent_loop.unbacked_claim(text, succeeded) == claim

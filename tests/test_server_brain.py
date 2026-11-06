@@ -81,7 +81,7 @@ def test_a_conversation_with_tools(ollama):
     assert session.send_results([(reply.calls[0], {"ok": True, "message": "5 pm"})]).text == "It's 5 pm."
     first, second = ollama.requests[0][1], ollama.requests[1][1]
     assert first["model"] == "kova-cmd" and first["think"] is False and first["stream"] is False
-    assert first["messages"][0] == {"role": "system", "content": "You are KOVA."}
+    assert first["messages"][0]["content"].startswith("You are KOVA. Rules for you: you cannot see the screen")
     assert second["messages"][-1]["role"] == "tool" and second["messages"][-1]["tool_name"] == "get_datetime"
     # Only the short list of tools is sent: every description is read with every request
     assert {t["function"]["name"] for t in first["tools"]} == set(server.DEFAULT_TOOLS) & \
@@ -226,7 +226,7 @@ def test_the_server_is_warmed_once_when_gemini_runs_low(requests, exhausted, war
 def test_warm_up_reads_the_prompt_and_writes_one_token(ollama):
     server.ServerProvider({}).warm_up("You are KOVA.", tool_registry.all_tools())
     body = ollama.requests[0][1]
-    assert body["messages"] == [{"role": "system", "content": "You are KOVA."}]
+    assert body["messages"] == [{"role": "system", "content": "You are KOVA." + server.SERVER_RULES}]
     assert body["options"] == {"num_predict": 1} and len(body["tools"]) == len(server.DEFAULT_TOOLS)
 
 

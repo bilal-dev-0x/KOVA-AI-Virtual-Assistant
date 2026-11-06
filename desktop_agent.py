@@ -74,6 +74,10 @@ LONG_COMMAND = re.compile(r"^(create|make (a|an|me)|rename|delete|remove|find|lo
 # Commands found by one word anywhere ("gpu", "ram"): in a longer sentence that isn't a plain
 # status question (often Roman Urdu), that word is part of a question for the brain
 KEYWORD_COMMANDS = {"cpu", "ram", "gpu", "disk", "battery", "cpu and ram"}
+# Also found by a few words anywhere: in a long sentence those words may be incidental
+LOOSE_COMMANDS = {"volume up", "volume down", "date", "time", "voice", "uptime", "startup apps", "top cpu",
+                  "top processes", "health report", "power plan", "task manager tab", "start menu", "exit",
+                  "restart yourself", "recall", "news", "search", "remember to", "look at screen", "click", "type"}
 STATUS_QUESTION = re.compile(r"^(what|whats|how|hows|show|check|tell|give|is|are|which|why|my|the|current)\b")
 # "how is my cpu and ram" has an "and" but only asks for the system status
 STATUS_ONLY = re.compile(
@@ -83,9 +87,11 @@ STATUS_ONLY = re.compile(
 # "put vs code on the left and chrome on the right" has an "and" but is one arrange command
 _SIDE = r"( window)?( on| to| at)?( the)? (?P<{}>left|right)( side| half)?"
 # "open chrome on the left and vs code on the right" is two actions for the agent, not an arrange
+# "maximize the vs code window at left and maximize the chrome window at right" (voice test) means the same
+_ARRANGE = r"((put|place|move|snap|arrange|align|aligned|shift|keep|set|maximi[sz]e|minimi[sz]e) )?"
 SIDE_BY_SIDE_BODY = (r"(?!(open|close|launch|start|run|kill|quit|exit|restart|play|search|find|delete)\b)"
-                     r"(?:((put|place|move|snap|arrange) )?(?P<a>.+?)" + _SIDE.format("sa")
-                     + r"( and| then)? ((put|place|move|snap) )?(?P<b>.+?)" + _SIDE.format("sb")
+                     r"(?:" + _ARRANGE + r"(?P<a>.+?)" + _SIDE.format("sa")
+                     + r"( and| then)? " + _ARRANGE + r"(?P<b>.+?)" + _SIDE.format("sb")
                      + r"|((put|show|place|arrange) )?(?P<c>.+?) and (?P<d>.+?) side by side)")
 SIDE_BY_SIDE = re.compile(rf"^(?:{SIDE_BY_SIDE_BODY})$")
 
@@ -321,6 +327,8 @@ REMINDER_PATTERNS = [
     rf"^set (?:a |an )?reminder (?:(?:for|of|in|after) )*{DELAY} (?:to |that |about )(?P<msg>.+)$",
     rf"^set (?:a |an )?reminder (?:to |that |about )(?P<msg>.+?) (?:in|after|for) {DELAY}$",
     rf"^(?:set |start )?(?:a |an )?{DELAY} (?:timer|alarm)$",
+    # "set a reminder for 6 30 pm (to call ammi)": the brain once said it would and set nothing
+    rf"^(?:set |make )?(?:a |an )?(?:reminder|alarm|timer) (?:for|at) {CLOCK}(?: (?:to|that|about|for) (?P<msg>.+))?$",
 ]
 
 
@@ -437,7 +445,10 @@ class Agent:
                     self.forget_all, help="forget everything"),
             Command("forget", r"^(forget|delete the memory|remove the memory)( about(?= )| that(?= ))?( (?P<arg>.+))?$",
                     self.forget, help="forget <something> / forget that", ask_text="Forget what?"),
-            Command("list reminders", r"^((list|show)( my| the)? (reminders|timers)|(what|which) (reminders|timers) do i have)$",
+            Command("list reminders", r"^((list|show)( me)?( all)?( my| the)? (reminders|timers|alarms)"
+                                      r"|(what|which) (reminders|timers|alarms) do i have"
+                                      r"|(tell me )?(what|which) are( all)?( my| the)? (reminders|timers|alarms)( i have| set)?"
+                                      r"|(tell me|read)( all)?( my| the)? (reminders|timers|alarms)|do i have any (reminders|timers))$",
                     lambda arg: tool("list_reminders"), help="list reminders"),
             Command("cancel reminders", r"^(cancel|clear|stop|delete)( all)?( my| the)? (reminders?|timers?|alarms?)$",
                     lambda arg: tool("cancel_reminder"), help="cancel reminders"),
@@ -473,7 +484,7 @@ class Agent:
                     lambda arg: tool("top_processes", sort_by="cpu")),
             Command("top processes", r"\b(top|heaviest|biggest) (processes|programs|apps)\b|\bwhat is using (my |the )?(ram|memory)\b",
                     lambda arg: tool("top_processes"), help="top processes / what is using my ram"),
-            Command("new tab", r"^(open )?(a )?(new )?tab( in (google|chrome|the browser|browser))?$",
+            Command("new tab", r"^(open )?(a )?(new )?tab( in (the )?(google|chrome|google chrome|browser)( window)?)?$",
                     lambda arg: tool("open_app", name="google"), help="open a new tab"),
             Command("check logs", r"^(check|read|show|tell me)( me)?( the| my| your)? "
                                  r"(logs?|locks?|blogs?|errors?|problems?)$",
@@ -507,7 +518,7 @@ class Agent:
                                     r"|^open (?P<arg2>.+?) in (vs )?code$",
                     lambda arg: tool("open_project", **({"name": arg} if arg else {})),
                     help="open my kova project (VS Code)"),
-            Command("run tests", r"^(run|check)( the| all)?( my)? tests( of| for| in)?( (?P<arg>.+?))?$"
+            Command("run tests", r"^(run|check)( the| all)?( my)? tests?( of| for| in)?( (?P<arg>.+?))?$"
                                  r"|^(run|check|test)( the)? (?P<arg2>.+?)(s)? tests$|^test (?P<arg3>.+?)( project)?$",
                     lambda arg: tool("run_tests", **({"name": arg} if arg else {})), help="run kova's tests"),
             Command("git status", r"^git status( of| for| in)?( (?P<arg>.+))?$"
@@ -639,7 +650,8 @@ class Agent:
                     lambda arg: tool("show_desktop"), help="show desktop"),
             Command("side by side", rf"^(?P<arg>{SIDE_BY_SIDE_BODY})$", self.side_by_side,
                     help="put vs code on the left and chrome on the right"),
-            Command("snap window", r"^(snap|put|move|place|send)( the| my)? (?P<arg>.+? (on |to |at )?(the )?"
+            Command("snap window", r"^(snap|put|move|place|send|align|aligned|shift|dock|keep)( the| my)? "
+                                   r"(?P<arg>.+? (on |to |at )?(the )?"
                                    r"(left|right)( side| half)?)$",
                     self.snap_window, help="snap chrome left / put notepad on the right"),
             Command("minimise", r"^minimi[sz]e( the| my)?( (?P<arg>.+?))?( window)?$",
@@ -752,6 +764,11 @@ class Agent:
         # Hybrid routing: simple commands stay local (instant, free, offline),
         # requests with several parts go to the agent
         stays_local = MEMORY_COMMAND.match(text) and not THEN_ACTION.search(text)
+        if not stays_local and not JOINERS.search(text):
+            # Long but one clear command ("tell me which apps are open right now in front of me"): local,
+            # unless only a keyword was found in it ("yah meri gpu per ..." stays a question)
+            matched = self.match(text)[0]
+            stays_local = matched is not None and matched.name not in KEYWORD_COMMANDS | LOOSE_COMMANDS
         if self.provider and needs_agent(text) and not stays_local:
             return self._ask_agent(raw_text)
 
@@ -842,6 +859,13 @@ class Agent:
         if command.name == "open" and not result.success and arg and games.find_game(arg):
             # "open far cry" when Far Cry is a game folder, not a Start menu app
             return self._tool("launch_game", name=arg)
+        if command.name == "open" and not result.success and arg:
+            # "open race debug mentor" (voice test): one of your projects, so its folder opens
+            from modules import dev
+            dev.configure(self.config)
+            project = dev.find_project(arg)
+            if project is not None:
+                return self._tool("open_folder", path=project.path)
         if (self.provider and command.name == "open" and not result.success
                 and _probably_not_an_app(arg, result)):
             # "open Mr Ahmed chat" is something inside the app in front, not an app: the agent can click it
