@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 import time
 
@@ -186,6 +187,14 @@ _language = "en-US"      # the language that heard you best last time
 # heard better as en-IN, and ur-PK gives Urdu text (that goes to the brain, not the commands)
 _languages = ["en-US", "en-IN"]
 STICKY = 0.05
+# How sure Google was of the last thing heard (0-1; 0.5 when it didn't say). Below UNSURE Max asks
+# you to say it again instead of acting on a guess (voice test: "search and ud" played a random video).
+# SPEECH_MIN_CONFIDENCE in config.json changes it; 0 turns it off.
+last_confidence = 1.0
+UNSURE = 0.35
+# A command that ends on one of these was cut off by a pause ("tell me the difference between")
+CUT_OFF = re.compile(r"\b(between|and|or|the|a|an|of|to|in|on|with|for|about|from|into|except|than|my|your|"
+                     r"is|are|that|which|want|you)$", re.IGNORECASE)
 
 
 def _choose_offline_voice(engine):
@@ -198,7 +207,9 @@ def _choose_offline_voice(engine):
 
 def configure(config):
     """MIC_THRESHOLD in config.json turns off auto-calibration (see: python main.py --mic-test)."""
-    global _fixed_threshold, _language
+    global _fixed_threshold, _language, UNSURE
+    if config.get("SPEECH_MIN_CONFIDENCE") is not None:
+        UNSURE = float(config["SPEECH_MIN_CONFIDENCE"])
     if config.get("MIC_THRESHOLD"):
         _fixed_threshold = float(config["MIC_THRESHOLD"])
     # Google listens for one language per request, so each of these gets the same recording and
@@ -374,12 +385,28 @@ def mic_test(seconds=15):
 def pick_language(results, current):
     """The (language, text) to use from {language: (text, confidence)}. The language that won last
     time gets STICKY extra, so Max only switches when another one clearly heard you better."""
+    global last_confidence
     scored = [(confidence + (STICKY if language == current else 0), language, text)
               for language, (text, confidence) in results.items() if text]
     if not scored:
         return None, None
     _, language, text = max(scored)
+    last_confidence = results[language][1]
     return language, text
+
+
+def unsure():
+    """True when Google itself wasn't sure of the last thing heard."""
+    return last_confidence < UNSURE
+
+
+def finish_cut_off(text, listen):
+    """'tell me the difference between' + a pause: listen a little longer and add the rest."""
+    if not text or not CUT_OFF.search(text.strip().rstrip(".,!?")):
+        return text
+    print("… (listening for the rest)")
+    rest = listen(wait_seconds=3, max_seconds=8)
+    return f"{text.strip()} {rest}" if rest else text
 
 
 def _recognize_in(audio, language):

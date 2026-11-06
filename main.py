@@ -154,7 +154,7 @@ def run_voice(agent):
         heard = voice_handler.listen_text(wait_seconds=wait_seconds, max_seconds=max_seconds)
         if heard:
             print("You said:", heard)
-            log.info("Heard: %s", heard)
+            log.info("Heard: %s (sure %.2f)", heard, voice_handler.last_confidence)
         return heard
 
     def ask(question):
@@ -216,6 +216,15 @@ def run_voice(agent):
             command = listen(wait_seconds=5)
             if not command:
                 continue
+
+        # Google wasn't sure what it heard: say it again, rather than act on a guess
+        if voice_handler.unsure():
+            log.info("Not acted on, speech recognition was unsure: %s", command)
+            speak(f"Sorry {agent.title}, I didn't catch that clearly. Please say it again.")
+            last_active = time.time()
+            continue
+        # "tell me the difference between" + a pause: the rest comes in the next breath
+        command = voice_handler.finish_cut_off(command, listen)
 
         # A 10 second timer counts from when Max finished saying "timer set"
         with reminders.hold_short_timers():

@@ -39,7 +39,13 @@ for _verb, (_past, _ing, _tools) in CLAIMS.items():
 _WORDS = "|".join(sorted(_FORMS, key=len, reverse=True))
 CLAIM = re.compile(
     rf"\bI(?:'ve| have|'ll| will|'m going to| am going to|'m| am)\s+(?:just\s+|now\s+|also\s+|successfully\s+)?"
+    rf"(?:force\s+|go ahead and\s+)?"  # "I'll force close Edge now" (voice test): nothing closed it
     rf"(?P<said>{_WORDS})\b|(?:^|[.!?]\s+)(?P<lead>{_WORDS})\b", re.IGNORECASE)
+# "I see the Valorant window", "The YouTube window is open and showing a search for film": a
+# description of the screen needs a tool that read it in this request
+SEE_CLAIM = re.compile(r"\bI (?:can )?(?:see|notice) (?:a|an|the|that|your|it|some|two|three|four|five)\b|\b(?:is|are) (?:now )?(?:open and )?(?:showing|displaying)\b"
+                       r"|\bon (?:your|the) screen\b", re.IGNORECASE)
+SEE_TOOLS = {"look_at_screen", "ui_read", "open_windows", "list_running_apps"}
 # "I've set a reminder" / "I'll set a timer for 6:30": only the reminder tool backs that
 SET_CLAIM = re.compile(r"\bI(?:'ve| have|'ll| will)\s+(?:just\s+|now\s+)?set\s+(?:a|an|the|your)\s+"
                        r"(?:reminder|timer|alarm)", re.IGNORECASE)
@@ -52,6 +58,8 @@ def unbacked_claim(text, succeeded):
         return None  # about something done in an earlier request
     if SET_CLAIM.search(text) and "set_reminder" not in succeeded:
         return "set"
+    if SEE_CLAIM.search(text) and not SEE_TOOLS & succeeded:
+        return "see"
     for match in CLAIM.finditer(text):
         word = (match["said"] or match["lead"]).lower()
         if match["lead"] and not word.endswith("ing"):
@@ -199,6 +207,10 @@ def run(session, text, runner, confirm, trace=print, max_steps=MAX_STEPS):
     if claim:
         log.warning("Answer not spoken: it says %r but no tool did that", claim)
         ran = f" What I did do: {', '.join(done)}." if done else ""
+        if claim == "see":
+            return Result(False, f"Sorry, I was about to describe your screen without looking at it.{ran} "
+                                 "Ask me what's on the screen, and I'll read it.",
+                          detail=f"The brain's answer was: {reply.text}")
         return Result(False, f"Sorry, I said I'd {claim} it, but nothing actually did that.{ran} "
                              "Please ask again, or say it a little differently.",
                       detail=f"The brain's answer was: {reply.text}")

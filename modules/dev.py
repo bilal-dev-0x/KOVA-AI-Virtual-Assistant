@@ -139,6 +139,35 @@ def open_in_vscode(name):
     return Result(True, f"Opening {project.name} in VS Code.")
 
 
+def open_path_in_vscode(ref):
+    """Any file or folder in VS Code: 'it' (the last file Max found or touched), 'the second one',
+    a project, a spoken path, or a name to find. Voice test: Max opened a folder in Explorer and
+    said it was VS Code, because only projects could open there."""
+    from modules import files, system_control
+    path = files.pick(ref) if ref else files._last.get("path")
+    if (not ref or re.fullmatch(r"(it|that|this|them)( file| folder)?", ref.lower().strip())) \
+            and not (path and os.path.exists(path)):
+        return Result(False, "I don't know which file you mean yet. Say its name, or find it first.")
+    if not path or not os.path.exists(path):
+        project = find_project(ref) if ref else None
+        path = project.path if project else system_control.spoken_path(ref or "")
+    if not path or not os.path.exists(path):
+        found = files.find(ref) if ref else None
+        path = files._found[0] if found is not None and found.success and files._found else None
+    if not path or not os.path.exists(path):
+        return Result(False, f"I can't find {ref or 'that'} to open in VS Code.")
+    problem = files.check_place(path, change=False)
+    if problem:
+        return problem
+    code = _vscode()
+    if code is None:
+        return Result(False, "I can't find VS Code on this PC.")
+    _popen([code, path])
+    files._last["path"] = path
+    log.info("Opened %s in VS Code", path)
+    return Result(True, f"Opening {Path(path).name} in VS Code.")
+
+
 def summary(name):
     project, problem = _project_or_problem(name)
     if problem:

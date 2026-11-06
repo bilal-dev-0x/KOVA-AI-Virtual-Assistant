@@ -375,6 +375,19 @@ def open_project(name: str = ""):
     return _dev().open_in_vscode(name)
 
 
+@tool("Open any file or folder in VS Code (not in its default app or Explorer).",
+      params={"target": "A file or folder: 'it' for the last one, a name like 'first_code.asm', or a path"},
+      confirm_text="open {target} in VS Code")
+def open_in_vscode(target: str = ""):
+    return _dev().open_path_in_vscode(target)
+
+
+@tool("Show an open browser tab by the words of its title, e.g. 'whatsapp' or 'gmail'.",
+      params={"name": "Words of the tab's title"}, confirm_text="switch to the {name} tab")
+def switch_tab(name: str):
+    return system_control.switch_tab(name)
+
+
 @tool("A short summary of a project: languages, branch, last commit, changed files.", params={"name": _PROJECT})
 def project_summary(name: str = ""):
     return _dev().summary(name)
