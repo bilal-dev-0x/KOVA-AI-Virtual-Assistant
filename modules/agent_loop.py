@@ -35,7 +35,14 @@ def system_prompt(config):
         "When the user states a lasting preference or fact about themselves (what they like, where "
         "they keep things, what they do), save it with the remember tool in their words; they are "
         "asked before it is saved. Never save passwords, PINs, keys or card numbers, and don't save "
-        "one-off requests."
+        "one-off requests. "
+        "For tasks inside an app: the ui_ tools work on the window in front; read it with ui_read before "
+        "clicking, give window= words of the title you expect, and do one step at a time. If a step says it "
+        "stopped, don't try another way; tell the user what happened. Use look_at_screen only when the "
+        "user asks about what is on the screen. "
+        "Work out sums and simple questions yourself; don't open the calculator or look at the screen for them. "
+        "When the user asks to open or click something inside the app in front (a chat, a contact, a tab, a "
+        "file in a list), do it with ui_read and ui_click instead of telling them where to click."
     )
 
 
@@ -49,8 +56,10 @@ def _args_text(args):
     return ", ".join(f"{k}={v!r}" for k, v in (args or {}).items())
 
 
-def run_calls(calls, runner, confirm, trace):
-    """Run one batch of tool calls. Returns [(call, result_dict)] and the Results."""
+def run_calls(calls, runner, confirm, trace, done=None):
+    """Run one batch of tool calls. Returns [(call, result_dict)] and the Results. done collects
+    what ran successfully. After a result that halts (the window changed), the rest is not run."""
+    done = [] if done is None else done
     permissions = runner.permissions
     prepared = [(call, *runner.prepare(call.name, call.args)) for call in calls]
 
@@ -58,16 +67,19 @@ def run_calls(calls, runner, confirm, trace):
     # Critical steps are asked about separately, right before they run.
     batch = [tool.describe(args) for _, tool, args, problem in prepared
              if problem is None and permissions.needs_approval(tool) and not permissions.asks_every_time(tool)]
-    batch_approved = confirm(_question(batch)) if batch else True
+    # bool(): an answer that is neither yes nor no (None) must count as no, never as "not needed"
+    batch_approved = bool(confirm(_question(batch))) if batch else True
 
     answers, results = [], []
     for call, tool, args, problem in prepared:
         trace(f"  → {call.name}({_args_text(call.args)})")
-        if problem:
+        if any(r.halt for r in results):
+            result = Result(False, "Not done: the plan stopped at an earlier step.")
+        elif problem:
             result = problem
         else:
             if permissions.asks_every_time(tool):
-                approved = confirm(f"This needs extra care. Should I really {tool.describe(args)}?")
+                approved = bool(confirm(f"This needs extra care. Should I really {tool.describe(args)}?"))
             elif permissions.needs_approval(tool):
                 approved = batch_approved
             else:
@@ -78,6 +90,8 @@ def run_calls(calls, runner, confirm, trace):
                 runner.record("agent", tool, args, "declined", result)
             else:
                 result = runner.run(tool, args, "approved" if approved else "not needed", source="agent")
+                if result.success:
+                    done.append(tool.describe(args))
         trace(f"  ← {result.message}")
         answers.append((call, result_for_ai(result)))
         results.append(result)
@@ -86,7 +100,7 @@ def run_calls(calls, runner, confirm, trace):
 
 def run(session, text, runner, confirm, trace=print, max_steps=MAX_STEPS):
     """Handle one request with the AI. Returns the final spoken Result."""
-    details = []
+    details, done = [], []
     try:
         reply = session.send(text)
         steps = 0
@@ -99,11 +113,19 @@ def run(session, text, runner, confirm, trace=print, max_steps=MAX_STEPS):
             steps += 1
             if reply.text:
                 trace(f"  💭 {reply.text}")
-            answers, results = run_calls(reply.calls, runner, confirm, trace)
+            answers, results = run_calls(reply.calls, runner, confirm, trace, done)
             details += [r.detail for r in results if r.detail]
+            halted = next((r for r in results if r.halt), None)
+            if halted:
+                # Something looked wrong: stop safely here, not let the brain try something else
+                session.reset()
+                log.info("Plan halted: %s", halted.message)
+                ran = f" I already did: {', '.join(done)}." if done else " Nothing else ran."
+                return Result(False, halted.message.rstrip(".") + "." + ran, detail="\n".join(details))
             reply = session.send_results(answers)
     except BrainError as e:
         session.reset()
+        log.warning("Agent could not answer: %s", e)
         return Result(False, str(e))
     except KeyboardInterrupt:
         session.reset()

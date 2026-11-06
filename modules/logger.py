@@ -1,8 +1,18 @@
 import logging
 import os
+import re
 from logging.handlers import RotatingFileHandler
 
 LOG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "logs")
+
+# A window title can hold a one-time code ("Login Code: 300253 - Gmail"): runs of 5-8 digits are
+# hidden in the log. Years, sizes and times have fewer digits and stay readable.
+CODE = re.compile(r"(?<!\d)\d{5,8}(?!\d)")
+
+
+class MaskingFormatter(logging.Formatter):
+    def format(self, record):
+        return CODE.sub("•••••", super().format(record))
 
 
 def get_logger():
@@ -17,7 +27,7 @@ def get_logger():
             backupCount=3,
             encoding="utf-8"
         )
-        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+        handler.setFormatter(MaskingFormatter("%(asctime)s %(levelname)s %(message)s"))
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
         logger.propagate = False

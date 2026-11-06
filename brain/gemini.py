@@ -1,6 +1,6 @@
 import time
 
-from brain.base import BrainError, Provider, Reply, Session, ToolCall
+from brain.base import LOOK_PROMPT, BrainError, Provider, Reply, Session, ToolCall
 from brain.budget import Budget
 from modules.logger import get_logger
 
@@ -32,6 +32,7 @@ def _quota_error(error):
 
 class GeminiProvider(Provider):
     name = "gemini"
+    can_look = True
 
     def __init__(self, config):
         self.config = config
@@ -129,6 +130,20 @@ class GeminiProvider(Provider):
             self.search_available = False
             return None
         return _text(response) or None
+
+    def look(self, image, question, context=""):
+        """One request with the picture and the question; costs one request of the daily quota."""
+        from google.genai import types
+        config = types.GenerateContentConfig(
+            system_instruction=LOOK_PROMPT,
+            automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            thinking_config=self.thinking_config(),
+        )
+        text = f"Earlier about this picture:\n{context}\n\nNow: {question}" if context else question
+        contents = [types.Part.from_bytes(data=image, mime_type="image/jpeg"), text]
+        response = self.request(lambda model: self.client().models.generate_content(
+            model=model, contents=contents, config=config))
+        return _text(response)
 
 
 def _text(response):

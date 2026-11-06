@@ -487,6 +487,7 @@ def close_tab(name, title, wait_seconds=3):
     if not _bring_to_front(hwnd):
         return Result(False, f"Windows didn't let me bring {key} to the front, so I didn't close anything. "
                              f"You can close the {shown} tab yourself.")
+    tabs_before = _tab_count(hwnd)
     _press_ctrl_w()
     deadline = time.time() + wait_seconds
     while time.time() < deadline:
@@ -494,7 +495,21 @@ def close_tab(name, title, wait_seconds=3):
             log.info("Closed %s tab %s", key, shown)
             return Result(True, f"Closed the {shown} tab in {key}")
         time.sleep(0.3)
+    # Two tabs with the same title ("WhatsApp" twice): the title stays, but there is one tab fewer
+    tabs_after = _tab_count(hwnd)
+    if tabs_before and tabs_after is not None and tabs_after < tabs_before:
+        log.info("Closed %s tab %s (another one with the same title is showing)", key, shown)
+        return Result(True, f"Closed the {shown} tab in {key}. Another {shown} tab is showing now.")
     return Result(False, f"The {shown} tab in {key} is still open.")
+
+
+def _tab_count(hwnd):
+    """How many tabs the browser window shows (UI Automation), or None if it can't be read."""
+    try:
+        from modules import ui_automation
+        return sum(1 for c in ui_automation.read_controls(hwnd) if c.kind == "tab")
+    except Exception:
+        return None
 
 
 def close_app(name, window="", wait_seconds=5):
@@ -802,18 +817,31 @@ def close_terminals(wait_seconds=4):
 # ---------- folders said out loud: "D drive coding arc" -> D:\Coding Arc ----------
 
 SPOKEN_DRIVE = re.compile(r"^(?:the )?(?P<letter>[a-z])(?: drive|:)\s*(?P<rest>.*)$", re.IGNORECASE)
+# Said the other way round: "learning assembly in coding arc folder in d drive"
+SPOKEN_INSIDE = re.compile(r"\s+(?:in|inside|on)\s+(?:the\s+|my\s+)?", re.IGNORECASE)
+
+
+def _outside_in(text):
+    """'learning assembly in coding arc folder in d drive' -> 'd drive coding arc learning assembly', or None."""
+    parts = SPOKEN_INSIDE.split(text)
+    if len(parts) < 2 or not re.match(r"^[a-z](?: drive|:)$", parts[-1].strip(), re.IGNORECASE):
+        return None
+    parts = [re.sub(r"\s+(folder|directory)$", "", p.strip(), flags=re.IGNORECASE) for p in reversed(parts)]
+    return " ".join(p for p in parts if p)
 
 
 def spoken_path(text):
     """A real folder for what was said or saved, or None.
 
-    'D:\\Coding Arc' and 'D drive coding arc' both work: after the drive, each part is
-    matched against the folders that exist, forgiving small speech mistakes.
+    'D:\\Coding Arc', 'D drive coding arc' and 'coding arc folder in d drive' all work: after the
+    drive, each part is matched against the folders that exist, forgiving small speech mistakes.
     """
     text = (text or "").strip().strip(".")
     if not text:
         return None
-    if re.match(r"^[a-z]:[\/]", text, re.IGNORECASE) or text.startswith("\\\\"):
+    text = _outside_in(text) or text
+    # [\\/]: a backslash or a slash ("[\/]" was only a slash, so "D:\" never matched)
+    if re.match(r"^[a-z]:[\\/]", text, re.IGNORECASE) or text.startswith("\\\\"):
         return text if os.path.isdir(text) else None
     match = SPOKEN_DRIVE.match(text)
     if not match:
@@ -821,7 +849,7 @@ def spoken_path(text):
     path = f"{match['letter'].upper()}:\\"
     if not os.path.isdir(path):
         return None
-    words = re.sub(r"[\/]", " ", match["rest"]).split()
+    words = re.sub(r"[\\/]", " ", match["rest"]).split()
     while words:
         try:
             folders = [d for d in os.listdir(path) if os.path.isdir(os.path.join(path, d))]

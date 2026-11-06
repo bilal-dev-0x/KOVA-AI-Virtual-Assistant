@@ -240,6 +240,10 @@ def main():
     for stream in (sys.stdout, sys.stderr):
         stream.reconfigure(encoding="utf-8", errors="replace")
 
+    # Real pixels on a 125% or 150% screen, so snapped windows land where they should
+    from modules import windows
+    windows.dpi_aware()
+
     if args.mic_test:
         from modules.voice_handler import mic_test
         mic_test()

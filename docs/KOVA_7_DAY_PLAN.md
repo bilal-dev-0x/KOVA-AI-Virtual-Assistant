@@ -83,8 +83,27 @@ Moved to Day 7: idle RAM/CPU measurements and the README.
 
 **Demo:** *"My laptop feels slow, close whatever is wasting RAM except VS Code, then tell me how much I saved."*
 
-## Day 3 (Thu 5 Nov): Memory + a Max that keeps watch 🧩 — roadmap Phases 4 and 2 🔨 IN PROGRESS
-*Today's plan and checklist: [DAY3_PLAN.md](DAY3_PLAN.md).*
+## Day 3 (Thu 5 Nov): Memory + a Max that keeps watch 🧩 — roadmap Phases 4 and 2 ✅ DONE
+*Plan and checklist: [DAY3_PLAN.md](DAY3_PLAN.md).*
+
+*Built:*
+- every Core item;
+- Advanced: auto-memory, activity recall, alerts, routines;
+- extra, from the voice tests: open a folder by memory or by voice ("open my project folder"),
+  close terminal windows (never Max's own), forget by number.
+
+*Changed:*
+- **Meaning-based recall is offline** (stems, a synonym table, near spellings). Gemini embeddings were left out:
+  the free key allows ~20 requests a day and the relay brain has none.
+- This PC has only the **Balanced** power plan, so the example "coding mode" has no power-plan step.
+- Stretch (Max suggests a routine) moved to Day 4's Stretch.
+
+*Tested:* voice tests of steps 1–2 (5 Nov) and 3–8 (6 Nov), then a text test of 66 hard commands (6 Nov).
+It found a "wifi pin" being saved, a "+92" phone number refused as a card number, "this week" read as the last app,
+"remember ... and open them" saving the action as part of the fact, a wrong answer for a routine that doesn't
+exist, and "in last week". All fixed; 741 tests.
+Commits: `b6699f2`, `8a92035`, `d2365b8` (the last three fixes are not committed yet).
+
 **Core**
 - `memory_engine.py` (SQLite): facts, preferences, an activity history.
 - Memory review, correction and deletion: "what do you remember about me?", "forget that".
@@ -106,21 +125,41 @@ Moved to Day 7: idle RAM/CPU measurements and the README.
 
 **Demo:** "remember I like lo-fi when coding" → restart Max → "what do you know about me?" → "coding mode".
 
-## Day 4 (Fri 6 Nov): Eyes and hands 👁️✋ — roadmap Phases 5 and 8
+## Day 4 (Fri 6 Nov): Eyes and hands 👁️✋ — roadmap Phases 5 and 8 🔨 BUILT, your test pending
+*Today's plan, checklist and your test list: [DAY4_PLAN.md](DAY4_PLAN.md).*
+
+*Built (not committed yet):*
+- every Core item and both Advanced items;
+- each step was reviewed by a second Claude session, and all its findings were fixed.
+
+*Not done:* Stretch (moved to Day 5).
+
+*Changed from the plan:*
+- Organising is limited to Downloads, Desktop and Documents.
+- Risky buttons (Delete, Send, Pay...) ask again.
+- A screenshot is taken with `PrintWindow`, so windows lying on top aren't in it.
+- Found and fixed along the way: an approval answered with neither yes nor no let a step run.
+
+929 tests. The live Gemini screenshot (quota) check is the first item of your test.
+
 **Core**
-- **Screen understanding:** "what's this error?", "summarise this page". A screenshot is taken **only on command** and sent to Gemini.
-- **Window control:** list, focus, minimise, maximise, snap, arrange ("VS Code left, Chrome right").
+- **Screen understanding:** "what's this error?", "summarise this page". A screenshot is taken **only on command**,
+  of the active window unless you say otherwise, kept in memory only, and sent to the brain
+  (Gemini with an image; the relay brain gets a file that is deleted after the answer).
+- **Window control:** list, focus, minimise, maximise, snap, arrange ("VS Code left, Chrome right"), with undo.
 - **File tools:**
-  - search, open, create and rename;
-  - organise Downloads, with a preview and an undo log;
-  - delete moves to the Recycle Bin only and counts as critical.
+  - find, open, create and rename, only in your own folders and non-system drives;
+  - programs and scripts are never opened;
+  - organise Downloads, with a preview and an undo log that survives a restart;
+  - delete moves to the Recycle Bin only (at most 20 files) and counts as critical.
 
 **Advanced**
-- **Windows UI Automation:** read the real buttons, menus and fields of any app, then click and type **by name** ("click Save", "type hello into the search box").
-- **Multi-step desktop tasks:** each step is previewed, consequential steps ask first, and Max **stops safely** if something looks wrong.
+- **Windows UI Automation:** read the real buttons, menus and fields of any app, then click and type **by name** ("click Save", "type hello into the search box"). Never types into password fields.
+- **Multi-step desktop tasks:** each step is previewed, consequential steps ask first, and Max **stops safely** if something looks wrong (the window changed, the control is missing).
 
 **Stretch**
 - Vision + UI Automation together: "click the blue Sign in button" on screens that have no accessible names.
+- Carried: Max suggests a routine after the same steps 3 times (Day 3); learned phrases and spoken progress (Day 2).
 
 **Demo:** "what's this error on my screen?" → "put VS Code on the left and Chrome on the right" → "organise my Downloads folder".
 
@@ -143,6 +182,8 @@ Moved to Day 7: idle RAM/CPU measurements and the README.
 
 **Stretch**
 - Per-game profiles, e.g. close Discord's overlay and set the volume.
+- Carried from Day 4: vision + UI Automation ("click the blue Sign in button"); from Day 3: Max suggests a
+  routine; from Day 2: learned phrases and spoken progress.
 
 **Demo:** "open my KOVA project, what changed today, run the tests" → "gaming mode, launch <game>" → "done gaming".
 
@@ -189,13 +230,24 @@ Moved to Day 7: idle RAM/CPU measurements and the README.
 
 ---
 
-## Backlog (after Day 7)
-- **Local LLM via Ollama** as a second brain provider:
-  - offline mode;
-  - saving Gemini quota on simple routing;
-  - privacy mode.
-  
-  The laptop has a Quadro P620 with 4 GB VRAM, so a 1.5–4B model fits (e.g. Qwen3 1.7B / Llama 3.2 3B). It would load only when needed and unload after idle. **Note:** the roadmap says "no local model inference", so this needs a roadmap change.
+## Backlog (after Day 7, or on a day that finishes early)
+- **server-realm brain:** the old laptop already runs Ollama, Whisper and the Jarvis API, reached over the
+  Ethernet cable (`192.168.50.2`, Tailscale `100.109.31.1` as the fallback). No model runs on this laptop,
+  so the "no local model inference" rule still holds.
+  - `brain/ollama.py`: an `OllamaProvider` behind the same interface as Gemini (`BRAIN_PROVIDER: "ollama"`).
+    It uses a new `kova-cmd` model (qwen3 4B instruct with `num_ctx` 6144), so the Jarvis API keeps its own fast `jarvis-cmd`.
+    **Why a new model:** KOVA sends 50 tools (~3,600 tokens; about 66 after Day 4) and `jarvis-cmd` has
+    `num_ctx` 2048, so most of the tools would be cut off. Ollama also gets a shorter tool list
+    (`OLLAMA_TOOLS`, ~15 tools).
+  - Who answers what:
+    - **qwen** (`kova-cmd`) for commands and tool calls;
+    - **llama** (`jarvis-chat`) or the Jarvis API `/ask` for chat, weather, news and Wikipedia facts;
+    - **Gemini** for long plans, "why/how" questions and anything with a picture.
+    
+    If the server isn't reachable, Max falls back to Gemini.
+  - Optional: speech-to-text through Whisper (`:8001/transcribe`), so hearing works when the hostel DNS is down.
+  - Server rule: gentle tests, one model at a time (8 GB RAM; ~3.4 GB free with both models loaded).
+  - Measured 6 Nov: ~8–10 tokens/s, so the first step of a plan may take 20–40 s. Simple commands stay local and instant.
 - Offline speech recognition (Whisper/Vosk) and an offline wake-word engine.
 - Camera input (only with clear activation).
 - GPU temperature monitoring (unreliable on Windows without vendor tools).
@@ -212,7 +264,10 @@ Moved to Day 7: idle RAM/CPU measurements and the README.
 |---|---|
 | Gemini free-tier limits: **measured on Day 2 at ~20 requests/day per model, with no search grounding** | Local-first routing, a model fallback chain, a 6-step cap, short tool descriptions, a daily budget guard; later Ollama or a paid key |
 | Gemini Live API on Python 3.14 / audio streaming | The current voice pipeline stays as the fallback; Live is an *Advanced* item |
+| Screenshots on the free Gemini key (unknown cost per image) | One measured test call on Day 4 before building on it; the relay brain can read pictures too |
 | UI Automation fails in unusual apps | Read before acting, stop on mismatch, use vision as a backup |
+| UI Automation through comtypes on Python 3.14 | comtypes 1.4.17 is installed; the `uiautomation` package is the fallback |
+| server-realm is off, unplugged or busy | Gemini stays the fallback brain; the cable has Tailscale as its own fallback |
 | PySide6 on Python 3.14 | Fall back to CustomTkinter |
 | More testing for you | Every day keeps a text-mode demo, and automated tests cover the logic |
 | A day overruns | Drop Stretch, then Advanced; Core always ships |

@@ -24,6 +24,26 @@ def no_real_windows(monkeypatch):
     """Tests never see or close the windows that are open on this PC."""
     monkeypatch.setattr(system_control, "app_windows", lambda names: [])
     monkeypatch.setattr(system_control, "_post_close", lambda hwnds: None)
+    from modules import screen, windows
+    monkeypatch.setattr(windows, "visible_windows", lambda: [])
+    monkeypatch.setattr(windows, "_press_win_d", lambda: None)
+    monkeypatch.setattr(windows, "_own_windows", lambda: set())
+    monkeypatch.setattr(windows, "_active_popup", lambda hwnd: None)
+
+    def no_screenshots(*args, **kwargs):
+        raise AssertionError("tests never take a real screenshot")
+    monkeypatch.setattr(screen, "_grab_window", no_screenshots)
+    monkeypatch.setattr(screen, "_grab_screen", no_screenshots)
+
+    from modules import ui_automation
+
+    def no_real_ui(*args, **kwargs):
+        raise AssertionError("tests never read, click or type in real windows")
+    for name in ("_read_tree", "_invoke", "_set_empty_value", "_replace_value", "_focus", "_still_focused",
+                 "_type_keys", "_press", "_is_hung", "_window_class", "_is_terminal"):
+        monkeypatch.setattr(ui_automation, name, no_real_ui)
+    yield
+    screen.reset()
 
 
 @pytest.fixture(autouse=True)
@@ -48,6 +68,25 @@ def isolated_files(monkeypatch, tmp_path):
     monkeypatch.setattr(routines, "ROUTINES_FILE", tmp_path / "routines.json")
     monkeypatch.setattr(routines, "EXAMPLE_FILE", tmp_path / "routines.json.example")
     routines._cache["key"] = None
+    # Files: your folders are temp folders, no real drive is searched, nothing is opened or recycled
+    from modules import files
+    home = tmp_path / "home"
+    known = {key: str(home / key.capitalize()) for key in files.KNOWN_FOLDERS}
+    for key in files.KNOWN_FOLDERS:
+        (home / key.capitalize()).mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(files, "_known", known)
+    monkeypatch.setattr(files, "_fixed_drives", lambda: [])
+    # pytest's temp folder is inside AppData, which Max refuses: tests get their own "system" folders
+    monkeypatch.setattr(files, "blocked_roots", lambda: [str(tmp_path / "system"), str(tmp_path / "kova")])
+    monkeypatch.setattr(files, "_drive_type", lambda root: files.DRIVE_FIXED)
+    monkeypatch.setattr(files, "ORGANISE_LOG_DIR", tmp_path / "organise_log")
+
+    def nothing_real(*args, **kwargs):
+        raise AssertionError("tests never open or recycle real files")
+    monkeypatch.setattr(files, "_start", nothing_real)
+    monkeypatch.setattr(files, "_recycle", nothing_real)
+    files._found.clear()
+    files._last["path"] = None
     yield
     alerts.stop()
     if memory_engine._memory is not None:

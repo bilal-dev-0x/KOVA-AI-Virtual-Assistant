@@ -4,7 +4,7 @@ import time
 import uuid
 from pathlib import Path
 
-from brain.base import BrainError, Provider, Reply, Session, ToolCall
+from brain.base import LOOK_PROMPT, BrainError, Provider, Reply, Session, ToolCall
 from modules.logger import get_logger
 
 # A testing brain: Max writes each request to logs/relay/request.json and waits for
@@ -34,10 +34,13 @@ def _write_json(path, data):
 
 class RelayProvider(Provider):
     name = "relay"
+    can_look = True  # Claude Code reads the picture file
 
     def __init__(self, config, folder=None):
         self.folder = Path(folder or RELAY_DIR)
         self.timeout = config.get("RELAY_TIMEOUT", 180)
+        # A screenshot left behind when Max was closed in the middle of a look
+        (self.folder / "screen.jpg").unlink(missing_ok=True)
         # Voice mode sets this: it listens briefly and returns True if the user said "cancel"
         self.while_waiting = None
 
@@ -80,6 +83,19 @@ class RelayProvider(Provider):
         finally:
             request_file.unlink(missing_ok=True)
         raise BrainError("Claude didn't answer in time. Is the chat session watching?")
+
+    def look(self, image, question, context=""):
+        """The picture goes to logs/relay/screen.jpg for Claude to read, and is deleted
+        as soon as the answer is in (or the wait ends)."""
+        self.folder.mkdir(parents=True, exist_ok=True)
+        picture = self.folder / "screen.jpg"
+        picture.write_bytes(image)
+        try:
+            answer = self.ask({"look": {"image": str(picture), "question": question, "context": context,
+                                        "instructions": LOOK_PROMPT}})
+        finally:
+            picture.unlink(missing_ok=True)
+        return str(answer.get("text") or "").strip()
 
     @staticmethod
     def _read(response_file, request_id):

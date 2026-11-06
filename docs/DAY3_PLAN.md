@@ -136,3 +136,8 @@ Example routines: *coding mode* (VS Code, terminal, lo-fi music, high performanc
   - Misheard: "IP performance", "are alert song", "RMS on", "proteins", "and do them"; "undo the alerts"
   - "remember my" with nothing after it is refused; "forget memory 15" forgets by number
   - Break time no longer toggles the music (the media key can't tell pause from play)
+- [x] Text test of 66 hard commands, with real memory, config and logs kept safe (6 Nov)
+  - "my wifi pin is 4455" is now refused; "+92 300 1234567" is a phone number, not a card (committed `d2365b8`)
+  - "this week" is a period, not "this" = the last app (committed `d2365b8`)
+  - "remember X and open them" goes to the agent; without a brain only the fact is saved
+  - "start my evening routine" says there is no such routine and lists yours; "last week", not "in last week"

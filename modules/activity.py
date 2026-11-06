@@ -17,7 +17,7 @@ FOCUS = ("all", "apps", "songs")
 LOOKUPS = {"recall", "list_memories", "list_reminders", "list_running_apps", "list_windows", "system_status",
            "cpu_usage", "ram_usage", "disk_space", "battery_status", "gpu_usage", "top_processes",
            "program_memory", "recent_problems", "get_datetime", "health_report", "uptime", "startup_apps",
-           "power_plan", "activity_summary", "list_routines"}
+           "power_plan", "activity_summary", "list_routines", "open_windows", "look_at_screen", "find_files", "ui_read"}
 # Memory tools are counted, never quoted: their arguments are your facts
 PRIVATE = {"remember", "forget_memory", "forget_all_memories"}
 
@@ -76,7 +76,8 @@ def _join(items):
 
 
 def summary(entries, period="today", focus="all"):
-    when = period if period in ("today", "yesterday") else f"in {period}" if period.startswith("last") else period
+    # "today", "this week", "last week", "in the last 7 days"
+    when = "in the last 7 days" if period == "last 7 days" else period
     if not entries:
         return Result(True, f"I didn't do anything for you {when}.")
 

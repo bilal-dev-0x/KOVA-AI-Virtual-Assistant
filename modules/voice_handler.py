@@ -181,7 +181,11 @@ ADAPT_RATE = 0.05        # how fast the room-noise estimate follows quiet moment
 
 _noise = None            # current estimate of the room's background level
 _fixed_threshold = None  # MIC_THRESHOLD from config.json, if set
-_language = "en-US"      # SPEECH_LANGUAGE from config.json, e.g. "ur-PK" for Urdu
+_language = "en-US"      # the language that heard you best last time
+# SPEECH_LANGUAGES in config.json, e.g. ["en-US", "en-IN", "ur-PK"]; Pakistani English is often
+# heard better as en-IN, and ur-PK gives Urdu text (that goes to the brain, not the commands)
+_languages = ["en-US", "en-IN"]
+STICKY = 0.05
 
 
 def _choose_offline_voice(engine):
@@ -197,12 +201,20 @@ def configure(config):
     global _fixed_threshold, _language
     if config.get("MIC_THRESHOLD"):
         _fixed_threshold = float(config["MIC_THRESHOLD"])
-    # Google listens for one language at a time; commands are matched in English
-    _language = config.get("SPEECH_LANGUAGE") or "en-US"
+    # Google listens for one language per request, so each of these gets the same recording and
+    # the most confident wins (see recognize). Commands are matched in English.
+    set_languages(config.get("SPEECH_LANGUAGES") or [config.get("SPEECH_LANGUAGE") or "en-US", "en-IN"])
     for gender in VOICES:
         VOICES[gender] = config.get(f"VOICE_{gender.upper()}") or VOICES[gender]
     if config.get("VOICE") in VOICES:
         set_voice(config["VOICE"])
+
+
+def set_languages(languages):
+    """The languages to listen in, the first one used first. At most 3: each costs a request per phrase."""
+    global _languages, _language
+    _languages = list(dict.fromkeys(str(lang) for lang in languages if lang))[:3] or ["en-US"]
+    _language = _languages[0]
 
 
 def current_threshold():
@@ -359,21 +371,65 @@ def mic_test(seconds=15):
         print("Looks good: your voice is clearly louder than the room.")
 
 
-def recognize(audio):
-    """Turn recorded audio into text. Returns None if nothing was understood."""
+def pick_language(results, current):
+    """The (language, text) to use from {language: (text, confidence)}. The language that won last
+    time gets STICKY extra, so Max only switches when another one clearly heard you better."""
+    scored = [(confidence + (STICKY if language == current else 0), language, text)
+              for language, (text, confidence) in results.items() if text]
+    if not scored:
+        return None, None
+    _, language, text = max(scored)
+    return language, text
+
+
+def _recognize_in(audio, language):
+    """(text, confidence) from Google in one language, or (None, 0). Raises RequestError when offline."""
     import speech_recognition as sr
+    try:
+        result = sr.Recognizer().recognize_google(audio, language=language, show_all=True)
+    except sr.UnknownValueError:  # nothing understood (raised even with show_all in 3.17)
+        return None, 0.0
+    if not isinstance(result, dict) or not result.get("alternative"):
+        return None, 0.0
+    best = result["alternative"][0]
+    # Google gives a confidence for its best guess only; without one, count it as middling
+    return best.get("transcript"), float(best.get("confidence", 0.5))
+
+
+def recognize(audio):
+    """Turn recorded audio into text. Returns None if nothing was understood.
+
+    Every language in SPEECH_LANGUAGES listens to the same recording at once (one request each,
+    side by side, so it is no slower), and the most confident wins. Max switches to the language
+    that heard you best and keeps it until another one clearly does better.
+    """
+    import speech_recognition as sr
+    from concurrent.futures import ThreadPoolExecutor
+    global _language
 
     if audio is None:
         return None
 
-    try:
-        return sr.Recognizer().recognize_google(audio, language=_language)
-    except sr.UnknownValueError:
-        return None
-    except sr.RequestError:
+    results, offline = {}, 0
+    with ThreadPoolExecutor(max_workers=len(_languages)) as pool:
+        futures = {language: pool.submit(_recognize_in, audio, language) for language in _languages}
+        for language, future in futures.items():
+            try:
+                results[language] = future.result()
+            except sr.RequestError:
+                offline += 1
+            except Exception as e:
+                log.warning("Speech recognition in %s failed: %s %s", language, type(e).__name__, e)
+    if offline == len(_languages):
         print("⚠️ Could not connect to recognition service.")
         log.warning("Speech recognition service unreachable")
         return None
+
+    language, text = pick_language(results, _language)
+    if language and language != _language:
+        log.info("Speech language %s -> %s (heard %r)", _language, language, text)
+        _language = language
+    return text
 
 
 def listen_text(wait_seconds=5, max_seconds=10):
