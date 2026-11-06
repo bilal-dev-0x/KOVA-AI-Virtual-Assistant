@@ -255,6 +255,12 @@ proposed fixes as a diff.
     window and a follow-up all right in 15–22 s. Login codes and card numbers are hidden before the text
     leaves the PC; text on screen that gives orders is never acted on (no tool runs while reading, and
     "I will now…" sentences are dropped). The 4B model can still get sums or guesses wrong.
+  - **✅ Two models since 6 Nov night:** `kova-cmd` (Qwen 4B) acts with tools; `kova-chat` (Llama 3.2 3B)
+    only talks: explanations, advice, jokes, Roman Urdu, 5–10 s instead of 10–16 s. Max sends a request
+    with no action word to `kova-chat`; when it says "I need my tools for that", `kova-cmd` answers. Both stay
+    loaded (`OLLAMA_MAX_LOADED_MODELS=2`, Bilal changed the one-model rule), with `kova-chat` on the CPU
+    (`num_gpu 0`): sharing the 2 GB GPU made Ollama unload `kova-cmd`, and its next answer took 2 minutes.
+    Switching back to `kova-cmd` now takes ~12 s. `SERVER_CHAT_MODEL: ""` = `kova-cmd` only.
   - Not done, on purpose: the server's older news/weather API, because it loads a second 4B model next to
     `kova-cmd` (8 GB RAM, Bilal's rule: don't slow either PC). Later: rename it to KOVA and let it use
     `kova-cmd`.

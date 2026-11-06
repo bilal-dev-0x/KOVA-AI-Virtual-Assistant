@@ -59,6 +59,43 @@ MAX_SCREEN_TEXT = 3000  # characters: about 750 tokens, read in some 17 seconds
 NO_WORDS = ("I couldn't find any words there. Without Gemini I can only read the text on the screen, "
             "not pictures.")
 
+# Two models on the server, each for what it does best. Both stay loaded (OLLAMA_MAX_LOADED_MODELS=2,
+# and kova-chat runs on the CPU with num_gpu 0, or Ollama unloads kova-cmd to free the 2 GB GPU and
+# kova-cmd then needs two minutes to read its prompt again).
+# kova-cmd (qwen3 4B) calls tools; kova-chat (llama3.2 3B) only talks, but 1.5-2x faster and in more
+# natural Roman Urdu (measured 6 Nov). Talk goes to kova-chat; when it says it needs a tool, or
+# isn't there, kova-cmd answers instead. SERVER_CHAT_MODEL: "" in config.json turns this off.
+DEFAULT_CHAT_MODEL = "kova-chat"
+# kova-chat gets its own short prompt: given Max's full one, all about tools, it answered
+# "main tool_joke tell karta hoon" (live test)
+CHAT_PROMPT = (
+    "You are {name}, a friendly assistant on the user's Windows PC. Call the user '{title}'. Your replies are "
+    "spoken aloud: one to three short sentences, plain text, no lists or markdown. Reply in the user's "
+    "language: English to English, Roman Urdu to Roman Urdu. Answer questions, explain things and give advice "
+    "yourself. You can't do anything on the PC in this chat. Only if the user asks you to do something on the "
+    "PC, or asks for a live fact (the time, date, weather, news, prices, system figures, files, apps, "
+    "reminders, the screen), answer exactly: I need my tools for that. Never talk about tools otherwise."
+)
+
+
+def chat_prompt(system_prompt):
+    """kova-chat's prompt, with the name and title from Max's own system prompt."""
+    name = re.search(r"You are (\w+)", system_prompt)
+    title = re.search(r"Address the user as '([^']+)'", system_prompt)
+    return CHAT_PROMPT.format(name=name[1] if name else "Max", title=title[1] if title else "Commander")
+# Words that need a tool: such a request goes straight to kova-cmd
+ACTION = re.compile(
+    r"\b(open|close|quit|exit|launch|start|run|play|pause|resume|stop|skip|next|set|remind|reminders?|timer|"
+    r"alarm|create|make|rename|delete|remove|move|snap|put|minimi[sz]e|maximi[sz]e|click|type|press|write|"
+    r"search|google|find|look|screen|window|volume|mute|unmute|shut ?down|restart|reboot|sleep|lock|kill|"
+    r"install|commit|push|send|organi[sz]e|undo|cancel|switch|turn|show|list|check|time|date|today|tomorrow|"
+    r"weather|news|price|cpu|ram|gpu|disk|battery|memory|running|apps?|games?|projects?|tests?|remember|"
+    r"recall|forget|download|upload|copy|paste|save|tab|folder|files?|brightness|wifi|bluetooth)\b",
+    re.IGNORECASE)
+# kova-chat asking for kova-cmd (live: it also wrote "TOOLS python, virtualenv" for an explanation)
+NEEDS_TOOL = re.compile(r"\bneed my tools\b|^\W*tools\b|\btool_\w+|\b(I (can't|cannot|can not|am unable to|don't have)|"
+                        r"unable to|no access|don't have access)\b", re.IGNORECASE)
+
 log = get_logger()
 
 
@@ -69,6 +106,7 @@ class ServerProvider(Provider):
         self.urls = config.get("SERVER_URLS") or DEFAULT_URLS
         self.model = config.get("SERVER_MODEL") or DEFAULT_MODEL
         self.tool_names = config.get("SERVER_TOOLS") or DEFAULT_TOOLS
+        self.chat_model = config.get("SERVER_CHAT_MODEL", DEFAULT_CHAT_MODEL)  # "" = kova-cmd does everything
         self._url = None  # the address that answered last
         self._can_look = None
         self._start = None  # (system prompt, tools) of the last session, for look()
@@ -83,7 +121,8 @@ class ServerProvider(Provider):
 
     def session(self, system_prompt, tools):
         wanted = set(self.tool_names)
-        session = ServerSession(self, system_prompt + SERVER_RULES, [t for t in tools if t.name in wanted])
+        session = ServerSession(self, system_prompt + SERVER_RULES, [t for t in tools if t.name in wanted],
+                                chat_prompt=chat_prompt(system_prompt))
         self._start = (session.system_prompt, session.tools)
         return session
 
@@ -120,11 +159,14 @@ class ServerProvider(Provider):
         Ollama keeps what it read, so the next real request starts from there."""
         session = self.session(system_prompt, tools)
         self.chat([{"role": "system", "content": session.system_prompt}], session.tools, options={"num_predict": 1})
+        if self.chat_model:
+            self.chat([{"role": "system", "content": session.chat_prompt}], [], options={"num_predict": 1},
+                      model=self.chat_model)
 
-    def chat(self, messages, tools, options=None):
+    def chat(self, messages, tools, options=None, model=None):
         """One /api/chat request. Tries the address that worked last, then the others."""
         body = json.dumps({
-            "model": self.model, "messages": messages, "stream": False,
+            "model": model or self.model, "messages": messages, "stream": False,
             "think": False,  # qwen3 could think for minutes; a desktop assistant needs the answer
             "tools": [{"type": "function", "function": {"name": t.name, "description": t.description,
                                                         "parameters": t.schema()}} for t in tools],
@@ -146,8 +188,8 @@ class ServerProvider(Provider):
                 log.warning("KOVA server at %s failed: %s", url, e)
                 continue
             self._url = url
-            log.info("KOVA server answered in %.1fs (%s tokens read, %s written)", time.time() - started,
-                     data.get("prompt_eval_count"), data.get("eval_count"))
+            log.info("KOVA server (%s) answered in %.1fs (%s tokens read, %s written)", model or self.model,
+                     time.time() - started, data.get("prompt_eval_count"), data.get("eval_count"))
             return data.get("message") or {}
         raise BrainError("I can't reach the KOVA server. Is the old laptop on and the cable plugged in?")
 
@@ -190,12 +232,37 @@ def _reply(message):
     return Reply(text=str(message.get("content") or "").strip(), calls=calls)
 
 
+def is_talk(text):
+    """True when the request (its last line: earlier lines are notes Max adds) needs no tool."""
+    lines = (text or "").strip().splitlines()
+    return bool(lines) and not ACTION.search(lines[-1])
+
+
 class ServerSession(Session):
-    def __init__(self, provider, system_prompt, tools):
+    def __init__(self, provider, system_prompt, tools, chat_prompt=None):
         self.provider = provider
         self.system_prompt = system_prompt
+        self.chat_prompt = chat_prompt or system_prompt
         self.tools = tools
         self.messages = []
+
+    def _talk(self):
+        """kova-chat's answer, or None when kova-cmd should answer (it needs a tool, or isn't there)."""
+        from modules.agent_loop import unbacked_claim
+        history = [{"role": m["role"], "content": m["content"]} for m in self.messages
+                   if m["role"] in ("user", "assistant") and m.get("content")]
+        try:
+            message = self.provider.chat([{"role": "system", "content": self.chat_prompt}] + history, [],
+                                         model=self.provider.chat_model)
+        except BrainError as e:
+            log.warning("kova-chat couldn't answer (%s), kova-cmd will", e)
+            return None
+        answer = str(message.get("content") or "").strip()
+        if not answer or NEEDS_TOOL.search(answer) or unbacked_claim(answer, set()):
+            log.info("kova-chat handed the request to kova-cmd")
+            return None
+        self.messages.append({"role": "assistant", "content": answer})
+        return answer
 
     def _ask(self):
         # The system prompt always leads, so Ollama can reuse what it already read
@@ -216,6 +283,10 @@ class ServerSession(Session):
     def send(self, text):
         self.messages.append({"role": "user", "content": text})
         self._trim()
+        if self.provider.chat_model and is_talk(text):
+            answer = self._talk()
+            if answer:
+                return Reply(text=answer)
         return self._ask()
 
     def send_results(self, results):

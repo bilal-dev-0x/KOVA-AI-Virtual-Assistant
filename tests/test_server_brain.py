@@ -252,3 +252,75 @@ def test_a_fallback_waits_for_a_running_warm_up():
     threading.Timer(0.2, release.set).start()
     session.send("two")
     assert order == ["warmed", "asked"]
+
+
+# ---------- two models on the server: kova-chat talks, kova-cmd acts ----------
+
+@pytest.mark.parametrize("said, talk", [
+    ("yaar mera laptop gaming karte waqt garam hota hai, kya karun?", True),
+    ("explain what a python virtual environment is", True),
+    ("tell me a joke about computers", True),
+    ("(Known about the user, in their words: likes cricket)\nwho won the 1992 world cup", True),
+    ("open chrome and search for cooling pads", False),
+    ("what time is it", False),
+    ("remind me at 6 to call ammi", False),
+    ("how much ram am i using", False),
+    ("(Known about the user: likes cricket)\nclose discord", False),
+])
+def test_what_counts_as_talk(said, talk):
+    assert server.is_talk(said) is talk
+
+
+def test_talk_goes_to_kova_chat_without_tools(ollama):
+    ollama.replies = [{"role": "assistant", "content": "Laptop ko cooling pad par rakhein."}]
+    session = server.ServerProvider({}).session("You are KOVA.", tool_registry.all_tools())
+    assert session.send("laptop garam hota hai kya karun").text == "Laptop ko cooling pad par rakhein."
+    body = ollama.requests[0][1]
+    assert body["model"] == "kova-chat" and body["tools"] == []
+    assert body["messages"][0]["content"] == server.CHAT_PROMPT.format(name="KOVA", title="Commander")
+    assert session.messages[-1] == {"role": "assistant", "content": "Laptop ko cooling pad par rakhein."}
+
+
+def test_actions_go_straight_to_kova_cmd(ollama):
+    session = server.ServerProvider({}).session("You are KOVA.", tool_registry.all_tools())
+    session.send("close discord")
+    assert [b["model"] for _, b in ollama.requests] == ["kova-cmd"]
+
+
+@pytest.mark.parametrize("chat_says", ["I need my tools for that.", "TOOLS python, virtualenv", "Main tool_joke tell karta hoon.", "I can't check that from here.", "I'll open it for you now.", ""])
+def test_kova_chat_hands_over_to_kova_cmd(ollama, chat_says):
+    ollama.replies = [{"role": "assistant", "content": chat_says},
+                      {"role": "assistant", "content": "", "tool_calls": [call("get_datetime")]}]
+    session = server.ServerProvider({}).session("You are KOVA.", tool_registry.all_tools())
+    reply = session.send("is it a good day for a walk")
+    assert reply.calls[0].name == "get_datetime"
+    assert [b["model"] for _, b in ollama.requests] == ["kova-chat", "kova-cmd"]
+    assert ollama.requests[1][1]["messages"][-1] == {"role": "user", "content": "is it a good day for a walk"}
+
+
+def test_kova_chat_missing_means_kova_cmd_answers(ollama, monkeypatch):
+    provider = server.ServerProvider({})
+    real_chat = provider.chat
+
+    def chat(messages, tools, options=None, model=None):
+        if model == "kova-chat":
+            raise BrainError("The KOVA server couldn't answer that.")
+        return real_chat(messages, tools, options, model)
+    monkeypatch.setattr(provider, "chat", chat)
+    assert provider.session("x", []).send("tell me a joke").text == "Done."
+
+
+def test_one_model_only_when_you_say_so(ollama):
+    server.ServerProvider({"SERVER_CHAT_MODEL": ""}).session("x", []).send("tell me a joke")
+    assert [b["model"] for _, b in ollama.requests] == ["kova-cmd"]
+
+
+def test_warm_up_loads_both_models(ollama):
+    server.ServerProvider({}).warm_up("You are KOVA.", tool_registry.all_tools())
+    assert [(b["model"], b["options"]) for _, b in ollama.requests] == [("kova-cmd", {"num_predict": 1}),
+                                                                        ("kova-chat", {"num_predict": 1})]
+
+
+def test_kova_chat_is_called_by_maxs_name_and_your_title():
+    prompt = server.chat_prompt("You are Max, an AI assistant. Address the user as 'Bilal bhai'. Use tools.")
+    assert prompt.startswith("You are Max,") and "Call the user 'Bilal bhai'" in prompt
