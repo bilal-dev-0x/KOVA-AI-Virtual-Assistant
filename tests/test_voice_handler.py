@@ -88,3 +88,68 @@ def test_soft_syllables_keep_recording():
 def test_medium_level_does_not_start_recording():
     medium = (LOUD * 0.6).astype(np.int16)
     assert collect_phrase(iter([medium] * 40), threshold=1000, wait_seconds=3, max_seconds=10) is None
+
+
+# ---------- listening in two languages at once ----------
+
+import pytest  # noqa: E402
+import speech_recognition as sr  # noqa: E402
+
+from modules import voice_handler  # noqa: E402
+
+
+@pytest.fixture
+def heard(monkeypatch):
+    """Fake Google: {language: (text, confidence)} or an exception for that language."""
+    answers = {}
+
+    def fake(audio, language):
+        answer = answers.get(language, (None, 0.0))
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+    monkeypatch.setattr(voice_handler, "_recognize_in", fake)
+    voice_handler.set_languages(["en-US", "en-IN"])
+    yield answers
+    voice_handler.set_languages(["en-US", "en-IN"])
+
+
+def test_the_more_confident_language_wins_and_max_switches(heard):
+    heard.update({"en-US": ("find mizoram", 0.62), "en-IN": ("find visora", 0.91)})
+    assert voice_handler.recognize(object()) == "find visora"
+    assert voice_handler._language == "en-IN"
+
+
+def test_the_current_language_keeps_a_small_head_start(heard):
+    voice_handler.set_languages(["en-IN", "en-US"])
+    heard.update({"en-US": ("open chrome", 0.88), "en-IN": ("open crome", 0.85)})
+    assert voice_handler.recognize(object()) == "open crome"   # 0.85 + 0.05 beats 0.88
+    assert voice_handler._language == "en-IN"
+
+
+def test_only_one_language_heard_anything(heard):
+    heard.update({"en-IN": ("max", 0.7)})
+    assert voice_handler.recognize(object()) == "max"
+
+
+def test_nothing_heard_in_any_language(heard):
+    assert voice_handler.recognize(object()) is None
+
+
+def test_offline_in_one_language_still_uses_the_other(heard):
+    heard.update({"en-US": sr.RequestError("dns"), "en-IN": ("open notepad", 0.8)})
+    assert voice_handler.recognize(object()) == "open notepad"
+
+
+def test_offline_in_every_language(heard, capsys):
+    heard.update({"en-US": sr.RequestError("dns"), "en-IN": sr.RequestError("dns")})
+    assert voice_handler.recognize(object()) is None
+    assert "Could not connect" in capsys.readouterr().out
+
+
+def test_languages_from_config():
+    voice_handler.configure({"SPEECH_LANGUAGE": "en-US"})
+    assert voice_handler._languages == ["en-US", "en-IN"]
+    voice_handler.configure({"SPEECH_LANGUAGES": ["en-IN", "ur-PK", "en-US", "en-GB"]})
+    assert voice_handler._languages == ["en-IN", "ur-PK", "en-US"]   # at most 3 requests per phrase
+    voice_handler.set_languages(["en-US", "en-IN"])

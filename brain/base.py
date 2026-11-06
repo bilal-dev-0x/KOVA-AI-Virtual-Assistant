@@ -35,8 +35,17 @@ class Session:
         """Forget the conversation (also used after an interrupted plan)."""
 
 
+LOOK_PROMPT = (
+    "You are looking at a screenshot of the user's Windows PC. Answer their question about it in two to four "
+    "short spoken sentences: plain text, no markdown, lists or emojis. If it shows an error, say what it means "
+    "and the most likely fix. Read out only what the question needs; never read out passwords, codes or "
+    "card numbers you happen to see. If the picture is too small or blurred to read, say so."
+)
+
+
 class Provider:
     name = "none"
+    can_look = False  # True if look() can answer questions about a picture
 
     def session(self, system_prompt, tools) -> Session:
         raise NotImplementedError
@@ -44,3 +53,8 @@ class Provider:
     def search(self, query):
         """A short answer from the live web, or None if this provider can't search."""
         return None
+
+    def look(self, image, question, context=""):
+        """Answer a question about one JPEG picture (bytes). context: earlier questions and
+        answers about the same picture. Raises BrainError when it can't."""
+        raise BrainError("This brain can't look at pictures.")

@@ -109,6 +109,218 @@ def list_running_apps():
     return system_control.running_apps()
 
 
+# ---------- windows (Day 4) ----------
+
+@tool("The windows open on screen, front first, as app and title.")
+def open_windows():
+    from modules import windows
+    return windows.open_windows()
+
+
+def _describe_move(a):
+    if a["position"] in ("maximise", "minimise", "restore"):
+        return f"{a['position']} {a['name']}"
+    if a["position"] == "front":
+        return f"bring {a['name']} to the front"
+    return f"put {a['name']} on the {a['position']}"
+
+
+@tool("Move an app's window: to the left or right half of its screen, maximise, minimise, restore, "
+      "or bring it to the front. Undo puts it back.",
+      params={"name": "App name, or words from the window's title",
+              "position": ("Where it goes", ["left", "right", "maximise", "minimise", "restore", "front"]),
+              "window": "Part of the window title, to pick one of several; leave out for the front one"},
+      confirm_text=_describe_move)
+def move_window(name: str, position: str, window: str = ""):
+    from modules import windows
+    return windows.move(name, position, window)
+
+
+def _describe_close_window(a):
+    from modules import windows
+    hwnd, app, title = windows.find(a["name"])
+    return f"close the {app} window {system_control.spoken_title(title)}" if hwnd else f"close the {a['name']} window"
+
+
+@tool("Close one window by its program or title, for apps close_app doesn't know (e.g. a photo viewer showing "
+      "'pic.png'). Like clicking its X, so it can still ask to save. Never closes terminals.",
+      params={"name": "Program name or words from the window title"},
+      level=CONTROLLED, confirm_text=_describe_close_window)
+def close_window(name: str):
+    from modules import windows
+    return windows.close_window(name)
+
+
+@tool("Put two apps side by side: the first on the left half of the screen, the second on the right.",
+      params={"left": "App for the left half", "right": "App for the right half"},
+      confirm_text="put {left} on the left and {right} on the right")
+def side_by_side(left: str, right: str):
+    from modules import windows
+    return windows.side_by_side(left, right)
+
+
+@tool("Minimise every window to show the desktop, like Win+D. Undo brings them back.",
+      confirm_text="show the desktop")
+def show_desktop():
+    from modules import windows
+    return windows.show_desktop()
+
+
+# ---------- screen (Day 4) ----------
+
+def _describe_look(a):
+    if a.get("same_picture"):
+        return "ask again about the last screenshot"
+    where = (f"the {a['app']} window" if a.get("app") else
+             {"screen": "your screen", "all screens": "all your screens"}.get(a.get("what"), "the window in front"))
+    return f"take a screenshot of {where} and send it to the AI"
+
+
+@tool("Look at the user's screen to answer a question about it, e.g. an error, a page or code. Takes one "
+      "screenshot of the window in front, a named app's window, the screen it is on, or all screens. "
+      "same_picture asks a follow-up about the last screenshot (within a minute) without taking a new one.",
+      params={"question": "The user's question about the screen",
+              "what": ("What to look at", ["window", "screen", "all screens"]),
+              "app": "An app's window to look at instead of the front one, e.g. 'chrome'",
+              "same_picture": "True for a follow-up about the last screenshot"},
+      level=CONTROLLED, confirm_text=_describe_look)
+def look_at_screen(question: str, what: str = "window", app: str = "", same_picture: bool = False):
+    from modules import screen
+    return screen.look(question, what, app, same_picture, provider=_context["provider"], config=_context["config"])
+
+
+# ---------- files (Day 4) ----------
+# Only in the user's own folders and non-system drives; programs are never opened; delete = Recycle Bin.
+
+def _files():
+    from modules import files
+    return files
+
+
+@tool("Find files or folders by name in the user's folders (Desktop, Documents, Downloads, ...) and D drive. "
+      "Returns numbered results; open_file, rename_item and delete_items accept those numbers.",
+      params={"query": "Words from the name, e.g. 'cv' or 'invoice march'"})
+def find_files(query: str):
+    return _files().find(query)
+
+
+@tool("Open a document, picture or folder: a number from find_files, a name on the Desktop, Documents or "
+      "Downloads, or a full path. Programs and scripts are refused.",
+      params={"target": "Number, name or full path"})
+def open_file(target: str):
+    return _files().open_item(target)
+
+
+@tool("Create a folder or a text file in one of the user's folders.",
+      params={"called": "Its name", "kind": ("What to create", ["folder", "file"]),
+              "where": "Folder: desktop, documents, downloads, ... or a full path (default desktop)",
+              "text": "Text to put in a new file"},
+      level=CONTROLLED,
+      confirm_text=lambda a: f"create the {a.get('kind', 'folder')} {a['called']} in {a.get('where', 'desktop')}")
+def create_item(called: str, kind: str = "folder", where: str = "desktop", text: str = ""):
+    return _files().create(called, kind, where, text)
+
+
+@tool("Rename a file or folder. A file keeps its extension when the new name has none.",
+      params={"target": "Number from find_files, name, full path, or 'it' for the last one",
+              "new_name": "The new name"},
+      level=CONTROLLED, confirm_text="rename {target} to {new_name}")
+def rename_item(target: str, new_name: str):
+    return _files().rename(target, new_name)
+
+
+def _describe_organise(a):
+    files = _files()
+    folder, _ = files.organisable(a.get("folder", "downloads"))
+    plan = files.organise_plan(folder) if folder else []
+    if not plan:
+        return f"organise {a.get('folder', 'downloads')}"
+    return f"sort the {len(plan)} loose files in {Path(folder).name} into folders: {files.describe_plan(plan)}"
+
+
+@tool("Sort the loose files in Downloads, Desktop or Documents into Pictures, Documents, Videos, Music, "
+      "Archives, Installers, Code and Other. Only the folder the user named: if they name any other folder "
+      "or a drive, don't use this tool, tell them it only sorts those three. undo_organise puts it all back.",
+      params={"folder": ("Which folder", ["downloads", "desktop", "documents"])},
+      level=CONTROLLED, confirm_text=_describe_organise)
+def organise_folder(folder: str = "downloads"):
+    return _files().organise(folder)
+
+
+@tool("Put back the files from the last organise_folder of a folder, even after Max was restarted.",
+      params={"folder": ("Which folder; leave out for the last one organised", ["downloads", "desktop", "documents"])},
+      level=CONTROLLED, confirm_text=lambda a: f"put the files in {a.get('folder') or 'the last organised folder'} back")
+def undo_organise(folder: str = ""):
+    return _files().undo_organise(folder)
+
+
+def _check_delete(targets):
+    return _files().delete_check(targets)[1]
+
+
+def _describe_delete(a):
+    """The full paths and how many: 'find invoice' then 'delete it' must show exactly which file goes."""
+    paths, _ = _files().delete_check(a["targets"])
+    if not paths:
+        return f"move {a['targets']} to the Recycle Bin"
+    things = "this" if len(paths) == 1 else f"these {len(paths)}"
+    return f"move {things} to the Recycle Bin: {'; '.join(paths)}"
+
+
+@tool("Move files or folders to the Recycle Bin (never deleted for good; refused on USB and network drives). "
+      "At most 20 at once.",
+      params={"targets": "Numbers from find_files, names or full paths, separated by ;"},
+      level=CRITICAL, check=_check_delete, confirm_text=_describe_delete)
+def delete_items(targets: str):
+    return _files().delete(targets)
+
+
+# ---------- UI Automation (Day 4) ----------
+# Always the window in front (never Max's terminal). window = words of the title the plan expects:
+# if another window is in front, the step stops the whole plan.
+
+def _ui():
+    from modules import ui_automation
+    return ui_automation
+
+
+_WINDOW = ("Words of the window title you expect in front, e.g. 'notepad' or 'save as'; always give it. "
+           "The plan stops if another window is in front")
+
+
+@tool("Read the buttons, menus, tabs and text fields of the window in front, by name.")
+def ui_read():
+    return _ui().describe()
+
+
+@tool("Click a button, menu, tab, link or checkbox in the window in front by its name, e.g. 'Save'. "
+      "The name must match exactly one control (see ui_read).",
+      params={"name": "The control's name", "window": _WINDOW},
+      level=CONTROLLED, confirm_text=lambda a: f"click {a['name']}" + (f" in {a['window']}" if a.get("window") else ""))
+def ui_click(name: str, window: str = ""):
+    # Delete / Send / Pay ... ask again right before, through the same confirm as everything else
+    return _ui().click(name, window, confirm=_context.get("confirm"))
+
+
+@tool("Type text into a text field of the window in front. Never into password fields; text already in "
+      "the field is kept (the new text goes in at the cursor).",
+      params={"text": "What to type", "field": "The field's name; leave out for the window's only text field",
+              "window": _WINDOW},
+      level=CONTROLLED,
+      confirm_text=lambda a: f"type '{a['text'][:40]}' into {a.get('field') or 'the text field'}"
+                             + (f" in {a['window']}" if a.get("window") else ""))
+def ui_type(text: str, field: str = "", window: str = ""):
+    return _ui().type_text(text, field, window)
+
+
+@tool("Press an everyday key or shortcut in the window in front: enter, escape, tab, backspace, ctrl+s, ctrl+a, "
+      "ctrl+c, ctrl+v, ctrl+z, ctrl+f, ctrl+n or ctrl+t. To clear a text box: ctrl+a, then backspace.",
+      params={"keys": "The key or shortcut, e.g. 'ctrl+s'", "window": _WINDOW},
+      level=CONTROLLED, confirm_text=lambda a: f"press {a['keys']}" + (f" in {a['window']}" if a.get("window") else ""))
+def ui_press_keys(keys: str, window: str = ""):
+    return _ui().press_keys(keys, window)
+
+
 # ---------- system ----------
 
 @tool("Current CPU, RAM, disk and battery figures.")
@@ -293,6 +505,7 @@ def first_youtube_video(query, timeout=6):
 SEARCH_SITES = {
     "google": "https://www.google.com/search?q=",
     "youtube": "https://www.youtube.com/results?search_query=",
+    "steam": "https://store.steampowered.com/search/?term=",  # "search titanfall 2 in steam"
 }
 
 

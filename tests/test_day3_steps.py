@@ -480,6 +480,39 @@ def test_activity_tool_reads_the_action_log(monkeypatch, history):
     assert result.success and "chrome" in result.message
 
 
+def test_periods_read_naturally(history):
+    assert activity.activity_summary(history, "last week", now=NOW).message == \
+        "I didn't do anything for you last week."
+    assert activity.activity_summary(history, "last 7 days", now=NOW).message.startswith("In the last 7 days I did")
+
+
+def test_remember_then_an_action_goes_to_the_agent():
+    provider = FakeProvider([Reply(text="Saved and opened.")])
+    max_, _ = agent(provider=provider)
+    assert max_.handle("remember I keep my notes in D:\\Notes and open them").message == "Saved and opened."
+    assert memory_engine.get_memory().count() == 0  # the agent's remember tool asks first
+
+
+def test_remember_then_an_action_without_a_brain_keeps_only_the_fact():
+    result = agent()[0].handle("remember I keep my notes in D:\\Notes and then open them")
+    assert result.success and "Ask me for the rest" in result.message
+    assert [f.text for f in memory_engine.get_memory().all()] == ["I keep my notes in D:\\Notes"]
+
+
+def test_remember_with_and_but_no_action_stays_one_fact():
+    provider = FakeProvider()
+    max_, _ = agent(provider=provider)
+    max_.handle("remember I like lo-fi when coding and jazz when gaming")
+    assert provider.fake_session.sent == []
+    assert memory_engine.get_memory().all()[0].text == "I like lo-fi when coding and jazz when gaming"
+
+
+def test_a_routine_that_does_not_exist(tmp_path):
+    result = agent()[0].handle("start my evening routine")
+    assert "I don't have a routine called evening routine" in result.message
+    assert "coding mode" not in result.message or "Your routines" in result.message
+
+
 @pytest.mark.parametrize("said", ["which apps did i open most this week", "what did i do this week",
                                   "what songs did you play this week"])
 def test_this_week_is_not_the_last_app(monkeypatch, history, said):

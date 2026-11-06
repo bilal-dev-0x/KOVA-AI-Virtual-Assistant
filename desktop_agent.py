@@ -1,3 +1,4 @@
+import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -5,8 +6,8 @@ from typing import Callable
 
 import brain
 import music_library  # noqa: F401  (tests reach the library through here)
-from modules import (agent_loop, alerts, media_keys, memory_engine, reminders, routines, system_control,  # noqa: F401
-                     tool_registry, tools)
+from modules import (agent_loop, alerts, files, media_keys, memory_engine, reminders, routines,  # noqa: F401
+                     screen, system_control, tool_registry, tools, windows)
 from modules.actions import ActionRunner
 from modules.fuzzy import best_match
 from modules.logger import get_logger
@@ -47,12 +48,16 @@ VAGUE_TARGETS = {"anything", "something", "stuff", "things", "something for me",
 # Memory commands stay local even when long: "remember I like lo-fi when coding and jazz when gaming".
 # "remember to call mom" is a reminder, not a fact, so it is left to the reminder or the agent.
 MEMORY_COMMAND = re.compile(r"^(remember|dont forget|keep in mind|forget)\b(?! to\b)")
+# ...unless an action follows the fact: "remember I keep my notes in D:\\Notes and open them"
+THEN_ACTION = re.compile(r"[\s,]+(and|then)( then)?\s+(open|close|launch|start|run|search|remind|show|"
+                         r"turn (on|off)|set (a|an|the))\b", re.IGNORECASE)
 # The fact is taken from what was said, before normalize() lowercased it and dropped "D:\\"
 REMEMBER_RAW = re.compile(r"\b(remember|don'?t forget|keep in mind)(\s+that)?[\s,:]+(?P<fact>.+)$",
                           re.IGNORECASE | re.DOTALL)
 # Commands whose "it"/"that" is not the last app ("forget that" = the last fact,
 # "this week" is a period)
-OWN_PRONOUNS = {"forget", "activity", "activity apps", "activity songs"}
+OWN_PRONOUNS = {"forget", "activity", "activity apps", "activity songs", "snap window", "side by side",
+                "look at screen", "rename", "delete"}  # "rename it" / "delete it": the last file, not app
 # Their replies hold your facts, so the agent only hears that one ran
 MEMORY_COMMANDS = {"remember", "remember to", "list memories", "forget all", "forget", "recall"}
 # Memories added to an agent request: at most this many, and only good matches
@@ -63,11 +68,53 @@ MEMORY_NOTE_SCORE = 0.6
 # a local regex would only see one part ("close whatever uses ram except vs code" is not "ram")
 JOINERS = re.compile(r"\b(and|then|so(?! (slow|bad|hot|loud|quiet|laggy|much|many|long|fast|high|low|full|busy)\b)|after|before|except|but|if|unless|whatever|whichever|because|while|instead)\b")
 MAX_LOCAL_WORDS = 8
+# Commands found by one word anywhere ("gpu", "ram"): in a longer sentence that isn't a plain
+# status question (often Roman Urdu), that word is part of a question for the brain
+KEYWORD_COMMANDS = {"cpu", "ram", "gpu", "disk", "battery", "cpu and ram"}
+STATUS_QUESTION = re.compile(r"^(what|whats|how|hows|show|check|tell|give|is|are|which|why|my|the|current)\b")
 # "how is my cpu and ram" has an "and" but only asks for the system status
 STATUS_ONLY = re.compile(
     r"^((how much|how|what)( is| are|s)?( my| the)? |(check|show|tell|give)( me)?( my| the)? |(my|the) )?"
     r"((cpu|processor) and (ram|memory)|(ram|memory) and (cpu|processor))"
     r"( usage| use| status| doing| looking| like| right now| now| am i using| is being used)*$")
+# "put vs code on the left and chrome on the right" has an "and" but is one arrange command
+_SIDE = r"( window)?( on| to| at)?( the)? (?P<{}>left|right)( side| half)?"
+# "open chrome on the left and vs code on the right" is two actions for the agent, not an arrange
+SIDE_BY_SIDE_BODY = (r"(?!(open|close|launch|start|run|kill|quit|exit|restart|play|search|find|delete)\b)"
+                     r"(?:((put|place|move|snap|arrange) )?(?P<a>.+?)" + _SIDE.format("sa")
+                     + r"( and| then)? ((put|place|move|snap) )?(?P<b>.+?)" + _SIDE.format("sb")
+                     + r"|((put|show|place|arrange) )?(?P<c>.+?) and (?P<d>.+?) side by side)")
+SIDE_BY_SIDE = re.compile(rf"^(?:{SIDE_BY_SIDE_BODY})$")
+
+# Looking at the screen. Only these phrases (or the agent, which asks first) take a screenshot.
+_SCREEN_THING = r"(error|problem|issue|message|warning|popup|pop up|page|article|code|email|document|window|text|screen)"
+LOOK_PHRASES = (
+    rf"^(what is|whats|what s|what does)( this| that| the) {_SCREEN_THING}( say| mean| about)?( on (my|the) screen)?$"
+    r"|^(what is|whats|what s) (on|in) (my|the|both|all)( my)? screens?$|^what am i looking at$"
+    r"|^what does (this|that) say$|^(can you )?(see|look at|check|read) (my|the|both|all)( my| whole)? screens?$"
+    rf"|^(summari[sz]e|read|explain|translate)( me)?( this| the| that) {_SCREEN_THING}( for me)?$"
+    r"|^summari[sz]e (this|that)( for me)?$"
+    r"|^look at (?P<arg>.+?)( window)?$")
+WHOLE_SCREEN = re.compile(r"\b(on|in) (my|the) screen$|\b(see|look at|check|read) (my|the)( whole)? screen$"
+                          r"|\bwhole screen\b|^what am i looking at$")
+ALL_SCREENS = re.compile(r"\b(both|all)( my| the)? screens\b|\bmy screens$")
+# "look at it", "look at the error": the window in front, not an app called "error"
+LOOK_GENERIC = {"it", "this", "that", "screen", "my screen", "the screen", "error", "the error", "page", "this page",
+                "code", "this code"}
+# Within a minute of a look, these ask about the same picture ("and" / "so" are dropped by normalize)
+FOLLOW_UP = re.compile(
+    r"^(how (do|can|should|would) i (fix|solve|change|do) (it|this|that)|what does (it|this|that) mean"
+    r"|what (should|do) i do( now| next| about it)?|why (is|did|does) (it|this|that)( happen| happening| say that)?"
+    r"|explain (it|this|that)( more| again| simply)?|tell me more|can you explain( it| that| more)?"
+    r"|what (is|was) (it|that) (for|about)|is (it|this|that) (bad|serious|safe|ok|okay|a problem)"
+    r"|where (do|should) i click|what about the .+)$")
+# "folder called test on my desktop": the place only counts when it is a folder Max knows,
+# so a name like "notes in urdu" isn't cut in two
+_PLACES = r"desktop|documents|downloads|pictures|music|videos|[a-z] drive.*"
+CREATE = re.compile(rf"^(?P<kind>folder|text file|file|note|notes file)( called| named)? (?P<name>.+?)"
+                    rf"( (on|in|inside|at|to) (my |the )?(?P<where>{_PLACES}))?$")
+# "type hello into the search box", "type milk in the text area": what goes where
+TYPE_INTO = re.compile(r"^(?P<text>.+?)(?: into (?:the |my )?(?P<f1>.+)| in (?:the |my )?(?P<f2>.+? (?:box|field|bar|area)))?$")
 # Answers that drop the question: "Close what?" -> "never mind" / "ok bye"
 NEVER_MIND = re.compile(r"^(no|nope|nah|none|nothing|cancel|stop|never ?mind|nevermind|forget it|leave it|"
                         r"bye|goodbye|good bye|bye bye|neither|no thanks)( then| thanks| thank you| bye)?$")
@@ -99,10 +146,25 @@ PLAN_NAMES = {"high performance": "high performance", "performance": "high perfo
               "battery saving": "power saver", "saver": "power saver", "ultimate performance": "ultimate performance"}
 _PLANS = "|".join(sorted(PLAN_NAMES, key=len, reverse=True))
 _PERIOD = "today|yesterday|this week|last week|last 7 days"
+# "start my evening routine" when there is no such routine (found ones were run before this)
+ROUTINE_ASK = re.compile(r"^(start|run|begin|do|activate)( my| the| a)? (?P<name>.+? (routine|mode))$")
+
+
+def side_by_side_args(text):
+    """'put vs code on the left and chrome on the right' -> ('vs code', 'chrome'), the left app first."""
+    m = SIDE_BY_SIDE.match(text or "")
+    if not m:
+        return None
+    if m["c"]:
+        return clean_arg(m["c"]), clean_arg(m["d"])
+    if m["sa"] == m["sb"]:
+        return None
+    first, second = clean_arg(m["a"]), clean_arg(m["b"])
+    return (first, second) if m["sa"] == "left" else (second, first)
 
 
 def needs_agent(text):
-    if STATUS_ONLY.match(text):
+    if STATUS_ONLY.match(text) or side_by_side_args(text):
         return False
     if JOINERS.search(text):
         return True
@@ -136,7 +198,13 @@ def normalize(text, wake_words=("kova",)):
             break
 
     text = re.sub(r" please$", "", text)
-    return _collapse_repeat(text.strip())
+    return _collapse_repeat(_join_spelled(text.strip()))
+
+
+def _join_spelled(text):
+    """'find visora v i s o r a' -> 'find visora visora': a name spelled out letter by letter
+    (3 letters or more) is one word again."""
+    return re.sub(r"\b[a-z](?: [a-z]\b){2,}", lambda m: m.group(0).replace(" ", ""), text)
 
 
 def _collapse_repeat(text):
@@ -210,8 +278,8 @@ ON_PC = re.compile(r" (in|on) (a |the |my )?(file explorer|explorer|pc|computer|
 
 def search_args(query):
     """'cats on youtube' -> query cats, site youtube; 'youtube for cats' too."""
-    match = (re.match(r"^(?P<site>youtube|google)( for)? (?P<q>.+)$", query)
-             or re.match(r"^(?P<q>.+?) (on|in) (?P<site>youtube|google)$", query))
+    match = (re.match(r"^(?P<site>youtube|google|steam)( for)? (?P<q>.+)$", query)
+             or re.match(r"^(?P<q>.+?) (on|in) (?P<site>youtube|google|steam)( store)?$", query))
     if match:
         return {"query": match["q"], "site": match["site"]}
     return {"query": query}
@@ -320,6 +388,7 @@ class Agent:
         self.raw_text = ""      # what was said, before normalize(): memory keeps its capitals and paths
         self.last_fact = None   # the memory "forget that" means
         self.closing_title = None  # (app, window title) when "close lofi music" named a window, not an app
+        self.closing_window = None  # (said, app, title) for a window of an app apps.json doesn't know
         self.last_played = None    # what "close the song" means
         self.trace = print if self.config.get("AGENT_TRACE", True) else (lambda line: None)
         self.commands = self._build_commands()
@@ -382,7 +451,7 @@ class Agent:
                     lambda arg: tool("volume_up"), help="volume up / down"),
             Command("volume down", r"\b(volume down|turn (it |the volume )?down|decrease (the )?volume|lower (the )?volume|quieter|softer)\b",
                     lambda arg: tool("volume_down")),
-            Command("mute", r"^(mute|unmute)( (the )?(volume|sound|audio))?$",
+            Command("mute", r"^(mute|unmute)( (the |this )?(volume|sound|audio|video|music|song|tab|it|pc|laptop))?$",
                     lambda arg: tool("mute"), help="mute / unmute"),
             Command("voice", rf"\b(?P<arg>{_GENDER})( sounding)? voice\b"
                              rf"|\bvoice (to|into) (a )?(?P<arg2>{_GENDER})\b"
@@ -414,7 +483,18 @@ class Agent:
                                   r"( (of|in|for))?( (?P<arg>.+))?$|^open (?P<arg2>.+?) in a new window$",
                     lambda arg: tool("new_window", name=arg), help="new window of <app>",
                     ask_text="New window of what?"),
-            Command("open folder", r"^(open|show)( me)?( my| the)? (?P<arg>.+? (folder|directory))$"
+            # After "find my cv": "open the second one"
+            Command("open found", r"^open( up)?( the| number)? (?P<arg>first|second|third|fourth|fifth|last|1st|2nd|3rd"
+                                  r"|4th|5th|one|two|three|four|five|[1-5])( one| file| result| folder)?$",
+                    lambda arg: tool("open_file", target=arg), help="open the first one (after find)"),
+            Command("open file", r"^open( the| my)? file (?P<arg>.+)$",
+                    lambda arg: tool("open_file", target=self._said(arg))),
+            # "open pictures on my pc": your own Pictures folder, not an app called "pictures on my pc"
+            # ("show desktop" stays Win+D; "open photos" / "open music" stay the apps)
+            Command("open my folder", r"^open( my| the)? (?P<arg>desktop|documents|downloads|pictures)( folder)?"
+                                      r"( on my (pc|computer|laptop))?$",
+                    lambda arg: tool("open_folder", path=files.place(arg)), help="open my downloads"),
+            Command("open folder", r"^(open|show)( me)?( my| the)? (?P<arg>.+? (folder|directory))( now| for me| again)?$"
                                    r"|^open (?P<arg2>[a-z] drive\b.*)$",
                     self.open_folder, help="open my project folder / open D drive coding arc"),
             Command("open", r"^(open|launch|start)( (?P<arg>.+))?$",
@@ -473,6 +553,66 @@ class Agent:
             Command("activity", rf"^what (did|have) (i|we|you) (do|done|did)( for me)?( (?P<arg>{_PERIOD}))?$"
                                 rf"|^what (did|have) you done for me( (?P<arg2>{_PERIOD}))?$",
                     lambda arg: tool("activity_summary", period=arg or "today"), help="what did I do yesterday"),
+            # ---------- Day 4: screen ----------
+            Command("look anyway", r"^(yes )?(look|check|do it|go ahead)( at it)? anyway$",
+                    lambda arg: screen.look_anyway(self.provider, self.config)),
+            Command("look at screen", LOOK_PHRASES, self.look_at_screen,
+                    help="what's this error / what's on my screen / summarise this page"),
+            # ---------- Day 4: UI Automation (the window in front) ----------
+            Command("ui read", r"^what can i (click|press|do|select) (here|in this window|on this screen|now)$"
+                               r"|^(what|which) (buttons|options|controls) (are there|are here|do i have|can you see)"
+                               r"( here| in this window)?$"
+                               r"|^(read|list|show)( me)? the (buttons|controls|options)( here| in this window)?$",
+                    lambda arg: tool("ui_read"), help="what can I click here"),
+            Command("press keys", r"^(press|hit)( the)? (?P<arg>enter|return|escape|esc|tab|(ctrl|control) [a-z])( key)?$",
+                    lambda arg: tool("ui_press_keys", keys=arg), help="press enter / press ctrl s"),
+            Command("click", r"^(click|tap|hit|press)( on)?( the)? (?P<arg>.+?)( button| link| tab| menu| option| checkbox)?$",
+                    lambda arg: tool("ui_click", name=self._said(arg)), level=CONTROLLED,
+                    confirm_text="Click {arg} in the window in front?", help="click <button name>"),
+            Command("type", r"^type( in)? (?P<arg>.+)$", self.type_into, help="type <text> into <field>"),
+            # ---------- Day 4: files ----------
+            Command("undo organise", r"^(undo|reverse)( the)? (organi[sz]ing|organi[sz]e|sorting|tidying)( of)?( my| the)? "
+                                     r"(?P<arg>downloads|desktop|documents)( folder)?$"
+                                     r"|^put (my|the) (?P<arg2>downloads|desktop|documents)( files)? back$",
+                    lambda arg: tool("undo_organise", folder=arg), help="undo organising my downloads"),
+            # Any folder or drive is answered here: the brain once sorted Documents when asked for "d drive"
+            Command("organise", r"^(organi[sz]e|sort|tidy( up)?)( my| the)? (?P<arg>downloads|desktop|documents|music"
+                                r"|pictures|photos|videos|[a-z] drive.*|.+ folder|.+ directory)( folder)?$"
+                                r"|^clean up( my| the)? (?P<arg2>downloads|desktop|documents)( folder)?$",
+                    self.organise_folder, help="organise my downloads"),
+            Command("create", r"^(create|make)( me)?( a| an)?( new)? (?P<arg>(folder|text file|file|note|notes file)\b.+)$",
+                    self.create_item, help="create a folder called <name> on my desktop"),
+            Command("rename", r"^rename( the)? (?P<arg>.+ to .+)$", self.rename_item,
+                    help="rename <it / name> to <new name>"),
+            Command("delete", r"^(delete|remove|trash|bin|recycle)( the)? (?P<arg>.+?)( file| folder)?$",
+                    self.delete_item, help="delete <it / name> (to the Recycle Bin)"),
+            # "find my cv on my pc" stays Windows' own search in File Explorer (the "search" command)
+            Command("find files", r"^(find|locate)( me)?( my| the| a| all)? (?P<arg>(?!.*" + ON_PC.pattern[:-1] + r"$).+)$",
+                    self.find_files, help="find my <file>"),
+            # ---------- Day 4: windows ----------
+            Command("list windows", r"^(list|show|read)( me)?( all)?( my| the)?( open)? windows$"
+                                    r"|^(what|which) windows (are|do i have) (open|there)$",
+                    lambda arg: tool("open_windows"), help="list my windows"),
+            Command("show desktop", r"^(show|go to)( me)?( the| my)? desktop$"
+                                    r"|^minimi[sz]e (everything|all( (the |my )?windows)?)$",
+                    lambda arg: tool("show_desktop"), help="show desktop"),
+            Command("side by side", rf"^(?P<arg>{SIDE_BY_SIDE_BODY})$", self.side_by_side,
+                    help="put vs code on the left and chrome on the right"),
+            Command("snap window", r"^(snap|put|move|place|send)( the| my)? (?P<arg>.+? (on |to |at )?(the )?"
+                                   r"(left|right)( side| half)?)$",
+                    self.snap_window, help="snap chrome left / put notepad on the right"),
+            Command("minimise", r"^minimi[sz]e( the| my)?( (?P<arg>.+?))?( window)?$",
+                    lambda arg: tool("move_window", name=arg, position="minimise"),
+                    help="minimise / maximise / restore <app>", ask_text="Minimise what?"),
+            Command("maximise", r"^(maximi[sz]e|full ?screen)( the| my)?( (?P<arg>.+?))?( window)?$"
+                                r"|^make (?P<arg2>.+?) (full ?screen|maximi[sz]ed)$",
+                    lambda arg: tool("move_window", name=arg, position="maximise"), ask_text="Maximise what?"),
+            Command("restore window", r"^(restore|unminimi[sz]e|unmaximi[sz]e)( the| my)?( (?P<arg>.+?))?( window)?$",
+                    lambda arg: tool("move_window", name=arg, position="restore"), ask_text="Restore what?"),
+            # "bring" alone needs "to the front": "bring me some water" isn't a window
+            Command("focus window", r"^(focus( on)?|switch to|bring up|bring back)( the| my)? (?P<arg>.+?)( window)?$"
+                                    r"|^bring( the| my)? (?P<arg2>.+?)( window)? (to the front|to front|forward|up|back)$",
+                    self.focus_window, help="switch to <app>"),
             Command("system status", r"^(status|health|report)$|\b(system (status|report|health)|(pc|computer|laptop) (status|health))\b"
                                      r"|^check( my| the)? (system|pc|computer|laptop)$",
                     lambda arg: tool("system_status"), help="system status"),
@@ -564,10 +704,20 @@ class Agent:
         if routine:
             return self.run_routine(routine, text)
 
+        # "and how do I fix it?" right after a look: the same picture, no new screenshot
+        if screen.recent() and FOLLOW_UP.match(text):
+            return self._tool("look_at_screen", question=raw_text.strip(), same_picture=True)
+
         # Hybrid routing: simple commands stay local (instant, free, offline),
         # requests with several parts go to the agent
-        if self.provider and needs_agent(text) and not MEMORY_COMMAND.match(text):
+        stays_local = MEMORY_COMMAND.match(text) and not THEN_ACTION.search(text)
+        if self.provider and needs_agent(text) and not stays_local:
             return self._ask_agent(raw_text)
+
+        # "start my evening routine" with no such routine: say so, not "I don't know an app"
+        missing = ROUTINE_ASK.match(text)
+        if missing and system_control.resolve(missing["name"]) is None:
+            return tools._check_routine(missing["name"])
 
         if text.startswith("google ") and system_control.is_app_alias(text):
             # "google chrome" is the app, not a Google search for "chrome"
@@ -576,6 +726,10 @@ class Agent:
         command, arg = self.match(text)
         if command is None:
             return self._fallback(raw_text, text)
+        if (self.provider and command.name in KEYWORD_COMMANDS and len(text.split()) >= 6
+                and not STATUS_QUESTION.match(text)):
+            # "yah meri gpu per sahi chal jaenge na" asks about games, it doesn't want a GPU report
+            return self._ask_agent(raw_text)
 
         if command.name in OWN_PRONOUNS:
             pass
@@ -617,6 +771,12 @@ class Agent:
             return self._tool("close_terminals")
         if command.name == "close" and self.closing_title:
             return self._close_titled(*self.closing_title)
+        if command.name == "close" and self.closing_window:
+            said, app, title = self.closing_window
+            self.closing_window = None
+            if not self.confirm(f"Close the {app} window {system_control.spoken_title(title)}?"):
+                return Result(False, "Okay, cancelled.")
+            return self._tool("close_window", name=said)
         if command.name == "close":
             # Several windows: say which one ("Chrome has 2 windows... Which one?")
             window = self._ask_which_window(arg)
@@ -637,6 +797,10 @@ class Agent:
             return Result(False, f"Sorry {self.title}, something went wrong with {command.name}.", detail=str(e))
 
         log.info("Command %s(%s) -> %s", command.name, arg or "", "ok" if result.success else "failed")
+        if (self.provider and command.name == "open" and not result.success
+                and _probably_not_an_app(arg, result)):
+            # "open Mr Ahmed chat" is something inside the app in front, not an app: the agent can click it
+            return self._ask_agent(raw_text)
         if self.provider and command.name not in ("exit", "sleep", "help", "greet"):
             # So the agent understands "actually close it" after a local "open discord".
             # Memory commands say only what kind they were: the facts themselves reach the
@@ -711,6 +875,7 @@ class Agent:
     def _prepare_close(self, arg):
         """Like check_app, but "close lofi music" can also mean the window showing it."""
         self.closing_title = None
+        self.closing_window = None
         if system_control._resolve_app(arg)[0] == "terminal":
             return "terminal", None  # closed window by window in handle(), never Max's own
         key, problem = system_control.check_app(arg, must_be_running=True)
@@ -720,6 +885,12 @@ class Agent:
                 log.info("Close %r means the %s window %r", arg, *found)
                 self.closing_title = found
                 return found[0], None
+            # Any other open window, by its program or title: "close wps photos", "close pic png"
+            hwnd, app, title = windows.find(arg)
+            if hwnd is not None:
+                log.info("Close %r means the window %r of %s", arg, title, app)
+                self.closing_window = (arg, app, title)
+                return arg, None
         return key, problem
 
     def open_folder(self, said):
@@ -803,6 +974,119 @@ class Agent:
         log.info("Window picked for %s: %r", app, picked or "all")
         return picked
 
+    # ---------- UI Automation ----------
+
+    def type_into(self, said):
+        m = TYPE_INTO.match(said)
+        args = {"text": self._said(m["text"])}
+        field = m["f1"] or m["f2"]
+        if field:
+            args["field"] = self._said(field)
+        return self._tool("ui_type", **args)
+
+    # ---------- files ----------
+
+    def _said(self, part):
+        """part as it was said, capitals and dots kept: 'kova notes txt' -> 'KOVA notes.txt'."""
+        words = (part or "").split()
+        if not words:
+            return part
+        found = re.search(r"\W*".join(map(re.escape, words)), self.raw_text, re.IGNORECASE)
+        return found.group(0) if found else part
+
+    def find_files(self, query):
+        if search_args(query).get("site"):  # "find cats on youtube" is a web search
+            return self.search(query)
+        return self._tool("find_files", query=query)
+
+    def create_item(self, said):
+        m = CREATE.match(said or "")
+        if not m:
+            return Result(False, "Say create a folder called, then its name.")
+        kind = "folder" if m["kind"] == "folder" else "file"
+        name, where = self._said(m["name"]), m["where"] or "desktop"
+        if not self.confirm(f"Should I create the {kind} {name} in {where}?"):
+            return Result(False, "Okay, I didn't create it.")
+        return self._tool("create_item", called=name, kind=kind, where=where)
+
+    def rename_item(self, said):
+        target, new_name = (part.strip() for part in said.rsplit(" to ", 1))
+        target = clean_arg(target)
+        target = target if target in PRONOUNS else self._said(target)
+        path = files.pick(target)
+        if path is None:
+            return files._missing(target)
+        new_name = self._said(new_name)
+        if not self.confirm(f"Should I rename {os.path.basename(path)} to {new_name}?"):
+            return Result(False, "Okay, I left the name.")
+        return self._tool("rename_item", target=path, new_name=new_name)
+
+    def delete_item(self, said):
+        target = said if said in PRONOUNS else self._said(said)
+        paths, problem = files.delete_check(target)
+        if problem:
+            return problem
+        # Critical: the one question shows exactly which file(s) by full path, and how many
+        things = "this" if len(paths) == 1 else f"these {len(paths)}"
+        if not self.confirm(f"Should I move {things} to the Recycle Bin: {'; '.join(paths)}?"):
+            return Result(False, "Okay, I kept it.")
+        return self._tool("delete_items", targets=";".join(paths))
+
+    def organise_folder(self, where):
+        folder, problem = files.organisable(where)
+        if problem:
+            return problem
+        plan = files.organise_plan(folder)
+        name = os.path.basename(folder.rstrip("\\/")) or folder
+        if not plan:
+            return Result(True, f"{name} has no loose files to sort.")
+        if not self.confirm(f"I'll sort {len(plan)} files in {name}: {files.describe_plan(plan)}. "
+                            "Move them into folders?"):
+            return Result(False, "Okay, I left them as they are.")
+        return self._tool("organise_folder", folder=where)
+
+    # ---------- screen ----------
+
+    def look_at_screen(self, app):
+        text = self.normalize(self.raw_text)
+        what = "all screens" if ALL_SCREENS.search(text) else "screen" if WHOLE_SCREEN.search(text) else "window"
+        args = {"question": self.raw_text.strip() or text, "what": what}
+        if app and app not in LOOK_GENERIC:
+            args["app"] = app
+        return self._tool("look_at_screen", **args)
+
+    # ---------- windows ----------
+
+    def _app_or_last(self, name):
+        """'it' / 'that' means the app the last action was about."""
+        if name in PRONOUNS or (name and name.split()[0] in PRONOUN_WORDS):
+            return self.runner.last_target
+        return name
+
+    def side_by_side(self, said):
+        pair = side_by_side_args(said)
+        if pair is None:
+            return Result(False, "Say which app goes on the left and which on the right.")
+        left, right = (self._app_or_last(name) for name in pair)
+        if not (left and right):
+            return Result(False, "Which apps should I put side by side?")
+        return self._tool("side_by_side", left=left, right=right)
+
+    def snap_window(self, said):
+        name, side = windows.split_side(said)
+        name = self._app_or_last(clean_arg(name))
+        if not name:
+            return Result(False, f"Which app should I put on the {side}?")
+        return self._tool("move_window", name=name, position=side)
+
+    def focus_window(self, name):
+        result = self._tool("move_window", name=name, position="front")
+        if not result.success and result.message.startswith("I can't see") and self.provider \
+                and system_control.resolve(name) is None:
+            # "switch to dark mode" isn't a window; the agent may know what it means
+            return self._ask_agent(self.raw_text)
+        return result
+
     def task_manager_tab(self, tab):
         result = self._tool("open_app", name="task manager")
         if result.success:
@@ -837,12 +1121,18 @@ class Agent:
         found = REMEMBER_RAW.search(self.raw_text)
         fact = (found["fact"] if found else arg).strip()
         fact = re.sub(r"[\s,]+please[.!]*$", "", fact, flags=re.IGNORECASE).strip(" .!")
+        # Without the brain, "... and open them" can't be done: keep only the fact
+        action = THEN_ACTION.search(fact)
+        if action:
+            fact = fact[:action.start()].strip(" .!,")
         if not memory_engine.keywords(fact):
             # "remember my" cut off by the mic saved a fact that just said "My"
             return Result(False, "I didn't catch what to remember. Say remember, then the whole thing.")
         result = self._tool("remember", fact=fact)
         if result.success:
             self.last_fact = memory_engine.get_memory().all()[0]
+            if action:
+                result.message += " Ask me for the rest on its own."
         return result
 
     def list_memories(self, arg):
