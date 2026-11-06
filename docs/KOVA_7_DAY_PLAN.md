@@ -163,7 +163,11 @@ Commits: `b6699f2`, `8a92035`, `d2365b8` (the last three fixes are not committed
 
 **Demo:** "what's this error on my screen?" → "put VS Code on the left and Chrome on the right" → "organise my Downloads folder".
 
-## Day 5 (Sat 7 Nov): Developer + gaming companion 💻🎮 — roadmap Phases 6 and 7
+## Day 5 (built Fri 6 Nov, evening): Developer + gaming companion 💻🎮 — roadmap Phases 6 and 7 ✅ BUILT, your test pending
+*As built, the live demo and your test: [DAY5_PLAN.md](DAY5_PLAN.md).* Games from Steam, Riot, Epic and
+the D drive (7 found), gaming mode, projects by their GitHub name, VS Code, tests (KOVA ran its own:
+1043 passed), git status and changes, commit and push only after a yes. Not done: per-game profiles,
+proposed fixes as a diff.
 **Core**
 - Projects: recognise a project, open it in VS Code, summarise it.
 - Run its tests and explain failures; explain errors (also read from the screen, using Day 4).

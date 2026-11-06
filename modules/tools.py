@@ -323,6 +323,98 @@ def ui_press_keys(keys: str, window: str = ""):
     return _ui().press_keys(keys, window)
 
 
+# ---------- games (Day 5) ----------
+
+def _games():
+    from modules import games
+    return games
+
+
+@tool("The games installed on this PC: Steam, Riot (VALORANT, League), Epic and games on the D drive.")
+def list_games():
+    return _games().list_report()
+
+
+@tool("Start an installed game by name, e.g. 'valorant', 'far cry', 'warframe'.",
+      params={"name": "Game name"}, confirm_text="start {name}")
+def launch_game(name: str):
+    return _games().launch(name)
+
+
+@tool("Gaming mode: High performance power plan if the PC has one, Max's alerts paused, and the apps "
+      "using the most RAM offered for closing (asked first). done_gaming puts it all back.",
+      confirm_text="turn on gaming mode")
+def gaming_mode():
+    return _games().gaming_mode(_context["config"], _context.get("confirm"))
+
+
+@tool("End gaming mode: the power plan and alerts back as they were, closed apps reopened.")
+def done_gaming():
+    return _games().done_gaming(_context["config"])
+
+
+# ---------- developer (Day 5) ----------
+# Fixed git and pytest commands only. Commit asks with the message; push asks again every time.
+
+def _dev():
+    from modules import dev
+    dev.configure(_context["config"])
+    return dev
+
+
+_PROJECT = "Project name, e.g. 'kova' or 'visora'; leave out for the last one used"
+
+
+@tool("The user's git projects (in the Coding Arc folder on the D drive).")
+def list_projects():
+    return _dev().list_report()
+
+
+@tool("Open a project in VS Code.", params={"name": _PROJECT}, confirm_text="open {name} in VS Code")
+def open_project(name: str = ""):
+    return _dev().open_in_vscode(name)
+
+
+@tool("A short summary of a project: languages, branch, last commit, changed files.", params={"name": _PROJECT})
+def project_summary(name: str = ""):
+    return _dev().summary(name)
+
+
+@tool("Run a Python project's tests (pytest) and say what failed.", params={"name": _PROJECT},
+      level=CONTROLLED, confirm_text=lambda a: f"run the tests of {a.get('name') or 'the project'}")
+def run_tests(name: str = ""):
+    return _dev().run_tests(name)
+
+
+@tool("git status of a project: changed files, commits not pushed yet.", params={"name": _PROJECT})
+def git_status(name: str = ""):
+    return _dev().git_status(name)
+
+
+@tool("What changed in a project since the last commit (a diff), to explain it or draft a commit message.",
+      params={"name": _PROJECT})
+def git_changes(name: str = ""):
+    return _dev().git_changes(name)
+
+
+def _check_commit(message, name=""):
+    return _dev().commit_check(name, message)
+
+
+@tool("Commit all changes of a project with a message. Files that look like keys or passwords are refused.",
+      params={"message": "The commit message, what changed and why", "name": _PROJECT},
+      level=CONTROLLED, check=_check_commit,
+      confirm_text=lambda a: f"commit {a.get('name') or 'the project'} with the message: {a['message']}")
+def git_commit(message: str, name: str = ""):
+    return _dev().commit(name, message)
+
+
+@tool("Push a project's commits to GitHub.", params={"name": _PROJECT},
+      level=CRITICAL, confirm_text=lambda a: f"push {a.get('name') or 'the project'} to GitHub")
+def git_push(name: str = ""):
+    return _dev().push(name)
+
+
 # ---------- system ----------
 
 @tool("Current CPU, RAM, disk and battery figures.")

@@ -70,7 +70,7 @@ def risky(name):
 def key_combo(said):
     """'control s', 'ctrl+S', 'Ctrl S' -> 'ctrl+s'; 'enter' -> 'enter'; None if not allowed."""
     said = re.sub(r"\s*\+\s*|\s+", "+", (said or "").strip().lower()).replace("control", "ctrl")
-    said = said.removesuffix("+key")
+    said = said.removesuffix("+key").replace("back+space", "backspace")
     return said if said in KEYS else None
 
 

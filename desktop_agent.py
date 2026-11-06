@@ -6,8 +6,8 @@ from typing import Callable
 
 import brain
 import music_library  # noqa: F401  (tests reach the library through here)
-from modules import (agent_loop, alerts, files, media_keys, memory_engine, reminders, routines,  # noqa: F401
-                     screen, system_control, tool_registry, tools, windows)
+from modules import (agent_loop, alerts, files, games, media_keys, memory_engine, reminders,  # noqa: F401
+                     routines, screen, system_control, tool_registry, tools, windows)
 from modules.actions import ActionRunner
 from modules.fuzzy import best_match
 from modules.logger import get_logger
@@ -68,6 +68,9 @@ MEMORY_NOTE_SCORE = 0.6
 # a local regex would only see one part ("close whatever uses ram except vs code" is not "ram")
 JOINERS = re.compile(r"\b(and|then|so(?! (slow|bad|hot|loud|quiet|laggy|much|many|long|fast|high|low|full|busy)\b)|after|before|except|but|if|unless|whatever|whichever|because|while|instead)\b")
 MAX_LOCAL_WORDS = 8
+TYPE_COMMAND = re.compile(r"^type\b")
+# Commands that stay local however long they are (unless they say "and" / "then")
+LONG_COMMAND = re.compile(r"^(create|make (a|an|me)|rename|delete|remove|find|locate|search|look up|google|play|open|put|move|snap|minimi[sz]e|maximi[sz]e|restore|click|press|remind me|set (a |an )?(timer|alarm|reminder)|remember|forget|organi[sz]e|undo)\b")
 # Commands found by one word anywhere ("gpu", "ram"): in a longer sentence that isn't a plain
 # status question (often Roman Urdu), that word is part of a question for the brain
 KEYWORD_COMMANDS = {"cpu", "ram", "gpu", "disk", "battery", "cpu and ram"}
@@ -164,12 +167,17 @@ def side_by_side_args(text):
 
 
 def needs_agent(text):
-    if STATUS_ONLY.match(text) or side_by_side_args(text):
+    # "type milk and eggs into the text area": everything after "type" is the text, "and" included;
+    # "type shopping list then save it" is two steps
+    if STATUS_ONLY.match(text) or side_by_side_args(text) or (TYPE_COMMAND.match(text)
+                                                               and not re.search(r"\bthen\b", text)):
         return False
     if JOINERS.search(text):
         return True
-    # Long but plain reminders ("set a timer of for 30 minutes 30 seconds") parse fine locally
-    return len(text.split()) > MAX_LOCAL_WORDS and parse_reminder(text) is None
+    # A clear command is long by nature ("create a folder called kova live test on my desktop");
+    # long but plain reminders ("set a timer of for 30 minutes 30 seconds") parse fine locally too
+    return (len(text.split()) > MAX_LOCAL_WORDS and parse_reminder(text) is None
+            and not LONG_COMMAND.match(text))
 
 
 def wake_words_from(config):
@@ -491,12 +499,46 @@ class Agent:
                     lambda arg: tool("open_file", target=self._said(arg))),
             # "open pictures on my pc": your own Pictures folder, not an app called "pictures on my pc"
             # ("show desktop" stays Win+D; "open photos" / "open music" stay the apps)
+            # ---------- Day 5: developer (before "open", so "open my kova project" is VS Code) ----------
+            Command("list projects", r"^(which|what) projects (do i have|are there)$|^(list|show)( me)?( all)?( my)? projects$"
+                                     r"|^my projects$",
+                    lambda arg: tool("list_projects"), help="what projects do I have"),
+            Command("open project", r"^open( up)?( my| the)? (?P<arg>.+? )?(project|repo|repository)( in (vs )?code)?$"
+                                    r"|^open (?P<arg2>.+?) in (vs )?code$",
+                    lambda arg: tool("open_project", **({"name": arg} if arg else {})),
+                    help="open my kova project (VS Code)"),
+            Command("run tests", r"^(run|check)( the| all)?( my)? tests( of| for| in)?( (?P<arg>.+?))?$"
+                                 r"|^(run|check|test)( the)? (?P<arg2>.+?)(s)? tests$|^test (?P<arg3>.+?)( project)?$",
+                    lambda arg: tool("run_tests", **({"name": arg} if arg else {})), help="run kova's tests"),
+            Command("git status", r"^git status( of| for| in)?( (?P<arg>.+))?$"
+                                  r"|^(is|are) (there )?(any )?(uncommitted|unpushed) (changes|commits)( in (?P<arg2>.+))?$",
+                    lambda arg: tool("git_status", **({"name": arg} if arg else {})), help="git status of kova"),
+            Command("git changes", r"^what (has )?changed( today)?( in (?P<arg>.+?))?( today)?$"
+                                   r"|^what did i change( today)?( in (?P<arg2>.+?))?( today)?$",
+                    lambda arg: tool("git_changes", **({"name": arg} if arg else {})), help="what changed in kova"),
+            Command("summarise project", r"^(summari[sz]e|describe|tell me about)( my| the)? (?P<arg>.+?) (project|repo)$",
+                    lambda arg: tool("project_summary", name=arg), help="summarise my visora project"),
+            Command("push project", r"^push( my| the)?( (?P<arg>.+?))?( project)?( to github)?$",
+                    self.push_project, help="push kova to github"),
             Command("open my folder", r"^open( my| the)? (?P<arg>desktop|documents|downloads|pictures)( folder)?"
                                       r"( on my (pc|computer|laptop))?$",
                     lambda arg: tool("open_folder", path=files.place(arg)), help="open my downloads"),
             Command("open folder", r"^(open|show)( me)?( my| the)? (?P<arg>.+? (folder|directory))( now| for me| again)?$"
                                    r"|^open (?P<arg2>[a-z] drive\b.*)$",
                     self.open_folder, help="open my project folder / open D drive coding arc"),
+            # ---------- Day 5: games ----------
+            Command("list games", r"^(which|what) games (are installed|do i have|are on my (pc|computer|laptop)|can i play)"
+                                  r"( on my (pc|computer|laptop))?$|^(list|show)( me)?( all)?( my| the)? games$|^my games$",
+                    lambda arg: tool("list_games"), help="which games do I have"),
+            Command("gaming mode", r"^((start|turn on|switch on|enable|activate|go into|enter) )?(the )?(gaming|game) mode"
+                                   r"( on)?$|^(lets|let s) (game|play some games)$",
+                    lambda arg: tool("gaming_mode"), help="gaming mode / done gaming"),
+            Command("done gaming", r"^(done|finished|stop|end) gaming$|^((turn off|stop|end|exit|disable) )?(the )?"
+                                   r"(gaming|game) mode( off)?$",
+                    lambda arg: tool("done_gaming")),
+            # "launch valorant" goes through "open": an app if there is one, else the game of that name
+            Command("launch game", r"^(launch|start|run|play|open)( the| my)? game (?P<arg>.+)$", self.launch_game,
+                    help="launch <game>"),
             Command("open", r"^(open|launch|start)( (?P<arg>.+))?$",
                     lambda arg: tool("open_app", name=arg), help="open <app or website>", ask_text="Open what?"),
             # "force close calculator", "close it anyway", "force it" after a close failed
@@ -564,7 +606,7 @@ class Agent:
                                r"( here| in this window)?$"
                                r"|^(read|list|show)( me)? the (buttons|controls|options)( here| in this window)?$",
                     lambda arg: tool("ui_read"), help="what can I click here"),
-            Command("press keys", r"^(press|hit)( the)? (?P<arg>enter|return|escape|esc|tab|(ctrl|control) [a-z])( key)?$",
+            Command("press keys", r"^(press|hit)( the)? (?P<arg>enter|return|escape|esc|tab|backspace|back space|(ctrl|control) [a-z])( key)?$",
                     lambda arg: tool("ui_press_keys", keys=arg), help="press enter / press ctrl s"),
             Command("click", r"^(click|tap|hit|press)( on)?( the)? (?P<arg>.+?)( button| link| tab| menu| option| checkbox)?$",
                     lambda arg: tool("ui_click", name=self._said(arg)), help="click <button name>"),
@@ -715,7 +757,8 @@ class Agent:
 
         # "start my evening routine" with no such routine: say so, not "I don't know an app"
         missing = ROUTINE_ASK.match(text)
-        if missing and system_control.resolve(missing["name"]) is None:
+        first = self.match(text)[0] if missing else None
+        if missing and (first is None or first.name == "open") and system_control.resolve(missing["name"]) is None:
             return tools._check_routine(missing["name"])
 
         if text.startswith("google ") and system_control.is_app_alias(text):
@@ -796,6 +839,9 @@ class Agent:
             return Result(False, f"Sorry {self.title}, something went wrong with {command.name}.", detail=str(e))
 
         log.info("Command %s(%s) -> %s", command.name, arg or "", "ok" if result.success else "failed")
+        if command.name == "open" and not result.success and arg and games.find_game(arg):
+            # "open far cry" when Far Cry is a game folder, not a Start menu app
+            return self._tool("launch_game", name=arg)
         if (self.provider and command.name == "open" and not result.success
                 and _probably_not_an_app(arg, result)):
             # "open Mr Ahmed chat" is something inside the app in front, not an app: the agent can click it
@@ -925,6 +971,8 @@ class Agent:
         return self._tool("set_alerts", on=on)
 
     def play(self, query):
+        if games.find_game(query, strict=True):  # "play valorant" is the game, "play softly" a song
+            return self._tool("launch_game", name=query)
         result = self._tool("play_music", query=query)
         if result.success:
             self.last_played = query
@@ -972,6 +1020,27 @@ class Agent:
             return Result(False, f"I couldn't tell which {app} window you meant, so I didn't close anything.")
         log.info("Window picked for %s: %r", app, picked or "all")
         return picked
+
+    # ---------- developer ----------
+
+    def push_project(self, name):
+        """Push asks with the project's real name: it sends your code to GitHub."""
+        from modules import dev
+        dev.configure(self.config)
+        project = dev.find_project(name or "")
+        if project is None:
+            return Result(False, f"I can't find a project called {name}.")
+        if not self.confirm(f"Push {project.name} to GitHub? Your code goes online."):
+            return Result(False, "Okay, I didn't push.")
+        return self._tool("git_push", name=project.name)
+
+    # ---------- games ----------
+
+    def launch_game(self, name):
+        """"start valorant" starts the game; "start notepad" is just an app."""
+        if games.find_game(name):
+            return self._tool("launch_game", name=name)
+        return self._tool("open_app", name=name)
 
     # ---------- UI Automation ----------
 

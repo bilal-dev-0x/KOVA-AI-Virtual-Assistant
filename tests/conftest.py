@@ -87,6 +87,21 @@ def isolated_files(monkeypatch, tmp_path):
     monkeypatch.setattr(files, "_recycle", nothing_real)
     files._found.clear()
     files._last["path"] = None
+    # Games: nothing is looked up on the real drives or started
+    from modules import games
+    games._cache["games"] = None
+    games._mode.update(on=False, plan=None, alerts=False, closed=[])
+    for name in ("_steam_games", "_riot_games", "_epic_games", "_folder_games"):
+        monkeypatch.setattr(games, name, lambda: iter(()))
+    monkeypatch.setattr(games, "_start", nothing_real)
+    # Projects: never your real repos (not even KOVA's own), nothing opened, no real pytest run
+    from modules import dev
+    (tmp_path / "projects").mkdir()
+    monkeypatch.setattr(dev, "BASE_DIR", str(tmp_path / "not-a-repo"))
+    monkeypatch.setattr(dev, "DEFAULT_ROOTS", [str(tmp_path / "projects")])
+    dev._config["roots"] = [str(tmp_path / "projects")]
+    dev._last["project"] = None
+    monkeypatch.setattr(dev, "_popen", nothing_real)
     yield
     alerts.stop()
     if memory_engine._memory is not None:

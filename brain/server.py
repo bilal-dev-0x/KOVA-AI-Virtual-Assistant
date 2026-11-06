@@ -18,13 +18,15 @@ DEFAULT_URLS = ["http://192.168.50.2:11434", "http://100.109.31.1:11434"]  # cab
 DEFAULT_MODEL = "kova-cmd"
 CONNECT_SECONDS = 3
 ANSWER_SECONDS = 240     # the first answer after the model loads can take a minute or more
-MAX_MESSAGES = 24        # older turns are dropped so every request stays small
+MAX_MESSAGES = 10        # older turns are dropped: requests stay small, and a small model
+                         # stops copying an old answer ("I can't type" said once was repeated)
 # The tools the server is told about (SERVER_TOOLS in config.json replaces this list). Every tool
 # description is read with every request, so fewer tools = faster answers.
-DEFAULT_TOOLS = ["open_app", "close_app", "close_window", "open_folder", "system_status", "top_processes",
-                 "health_report", "set_reminder", "play_music", "play_pause", "volume_up", "volume_down",
-                 "get_datetime", "remember", "recall", "find_files", "open_file", "move_window", "ui_read",
-                 "ui_click", "ui_type", "ui_press_keys"]
+DEFAULT_TOOLS = ["open_app", "close_app", "close_window", "close_tab", "open_folder", "system_status",
+                 "top_processes", "health_report", "set_reminder", "play_music", "play_pause", "volume_up",
+                 "volume_down", "get_datetime", "remember", "recall", "find_files", "open_file", "create_item",
+                 "rename_item", "delete_items", "move_window", "ui_read", "ui_click", "ui_type", "ui_press_keys",
+                 "list_games", "launch_game", "open_project", "git_status"]
 
 log = get_logger()
 
