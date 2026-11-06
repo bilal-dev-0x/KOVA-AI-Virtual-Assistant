@@ -131,7 +131,7 @@ class GeminiProvider(Provider):
             return None
         return _text(response) or None
 
-    def look(self, image, question, context=""):
+    def look(self, image, question, context="", read=None):
         """One request with the picture and the question; costs one request of the daily quota."""
         from google.genai import types
         config = types.GenerateContentConfig(

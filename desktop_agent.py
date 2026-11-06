@@ -97,8 +97,16 @@ SIDE_BY_SIDE = re.compile(rf"^(?:{SIDE_BY_SIDE_BODY})$")
 
 # Looking at the screen. Only these phrases (or the agent, which asks first) take a screenshot.
 _SCREEN_THING = r"(error|problem|issue|message|warning|popup|pop up|page|article|code|email|document|window|text|screen)"
+# A question about "this log" / "that order": something on screen (live test: these went to the
+# agent, and the KOVA server answered "I don't have access to the log")
+_SEEN = (r"(error|problem|issue|message|warning|popup|pop up|page|article|code|email|document|window|text|screen"
+         r"|log|order|table|form|dialog|list|chart|bill|receipt|invoice|button|link|menu|tab|setting|settings"
+         r"|post|comment|review|output|result|results)s?")
 LOOK_PHRASES = (
-    rf"^(what is|whats|what s|what does)( this| that| the) {_SCREEN_THING}( say| mean| about)?( on (my|the) screen)?$"
+    rf"^(what|whats|what s|which|why|where|who|how much|how many)\b.*\b(this|that) {_SEEN}\b.*$"
+    rf"|^what went wrong( (in|with) (this|that|the) {_SEEN})?$"
+    r"|^what (colou?r|color) (is|are) (the|this|that) .+$"
+    rf"|^(what is|whats|what s|what does)( this| that| the) {_SCREEN_THING}( say| mean| about)?( on (my|the) screen)?$"
     r"|^(what is|whats|what s) (on|in) (my|the|both|all)( my)? screens?$|^what am i looking at$"
     r"|^what does (this|that) say$|^(can you )?(see|look at|check|read) (my|the|both|all)( my| whole)? screens?$"
     rf"|^(summari[sz]e|read|explain|translate)( me)?( this| the| that) {_SCREEN_THING}( for me)?$"

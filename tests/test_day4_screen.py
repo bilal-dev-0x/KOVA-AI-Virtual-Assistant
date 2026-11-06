@@ -27,7 +27,7 @@ class LookProvider(FakeProvider):
         self.answers = list(answers)
         self.looks = []  # (image, question, context)
 
-    def look(self, image, question, context=""):
+    def look(self, image, question, context="", read=None):
         self.looks.append((image, question, context))
         return self.answers.pop(0) if self.answers else "Another answer."
 

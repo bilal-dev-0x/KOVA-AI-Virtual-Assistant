@@ -9,11 +9,13 @@ from modules.logger import get_logger
 # quota lasts; when it can't (the day's quota is used up, it's busy, or the internet is down),
 # the KOVA server answers instead, so Max never goes without a brain. After a Gemini failure the
 # server keeps answering for BACKUP_MINUTES before Gemini is tried again, so a used-up quota
-# doesn't cost a failed request every time. The screen stays with Gemini: the server can't look.
+# doesn't cost a failed request every time. Gemini sees the screen; the server can't see
+# pictures, so it gets the screen's text, read by Windows OCR.
 
 BACKUP_MINUTES = 10
 SWITCH_NOTE = ("🖥️  Gemini can't answer right now, so the KOVA server will. "
                "Its first answer can take a minute.")
+READ_NOTE = "🖥️  Gemini can't look right now: reading the screen's text for the KOVA server."
 
 log = get_logger()
 
@@ -74,7 +76,7 @@ class HybridProvider(Provider):
 
     @property
     def can_look(self):
-        return self.primary.can_look
+        return self.primary.can_look or self.backup.can_look
 
     def primary_ok(self):
         return time.time() >= self._primary_back_at
@@ -91,8 +93,20 @@ class HybridProvider(Provider):
     def search(self, query):
         return self.primary.search(query) if self.primary_ok() else None
 
-    def look(self, image, question, context=""):
-        return self.primary.look(image, question, context)
+    def look(self, image, question, context="", read=None):
+        """Gemini sees the picture; when it can't, the server answers from the screen's text."""
+        if self.primary_ok() and self.primary.can_look:
+            try:
+                return self.primary.look(image, question, context, read=read)
+            except BrainError as e:
+                if not self.backup.can_look:
+                    raise
+                self.primary_failed(e)
+        if not self.backup.can_look:
+            raise BrainError("Gemini can't look right now, and the KOVA server can't read the screen here.")
+        print(READ_NOTE)
+        self.wait_for_warm_up()
+        return self.backup.look(image, question, context, read=read)
 
 
 class HybridSession(Session):

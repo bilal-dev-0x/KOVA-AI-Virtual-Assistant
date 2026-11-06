@@ -84,7 +84,7 @@ class RelayProvider(Provider):
             request_file.unlink(missing_ok=True)
         raise BrainError("Claude didn't answer in time. Is the chat session watching?")
 
-    def look(self, image, question, context=""):
+    def look(self, image, question, context="", read=None):
         """The picture goes to logs/relay/screen.jpg for Claude to read, and is deleted
         as soon as the answer is in (or the wait ends)."""
         self.folder.mkdir(parents=True, exist_ok=True)

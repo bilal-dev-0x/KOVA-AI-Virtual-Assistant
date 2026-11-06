@@ -45,7 +45,7 @@ LOOK_PROMPT = (
 
 class Provider:
     name = "none"
-    can_look = False  # True if look() can answer questions about a picture
+    can_look = False  # True if look() can answer questions about the screen
 
     def session(self, system_prompt, tools) -> Session:
         raise NotImplementedError
@@ -54,7 +54,8 @@ class Provider:
         """A short answer from the live web, or None if this provider can't search."""
         return None
 
-    def look(self, image, question, context=""):
+    def look(self, image, question, context="", read=None):
         """Answer a question about one JPEG picture (bytes). context: earlier questions and
-        answers about the same picture. Raises BrainError when it can't."""
+        answers about the same picture; read(): the picture's text, for a brain that can't see
+        pictures. Raises BrainError when it can't."""
         raise BrainError("This brain can't look at pictures.")

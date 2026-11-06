@@ -35,6 +35,14 @@ def no_real_windows(monkeypatch):
     monkeypatch.setattr(screen, "_grab_window", no_screenshots)
     monkeypatch.setattr(screen, "_grab_screen", no_screenshots)
 
+    # Windows OCR: off unless a test turns it on, so results don't depend on this PC
+    from modules import ocr
+
+    def no_ocr(*args, **kwargs):
+        raise AssertionError("tests never run the real OCR")
+    monkeypatch.setattr(ocr, "available", lambda: False)
+    monkeypatch.setattr(ocr, "read_text", no_ocr)
+
     from modules import ui_automation
 
     def no_real_ui(*args, **kwargs):
