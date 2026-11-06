@@ -44,6 +44,7 @@ PROTECTED_FILES = {"pagefile.sys", "swapfile.sys", "hiberfil.sys"}
 # Only these get sorted: your own loose files, not a drive or a project laid out by hand
 ORGANISABLE = ("downloads", "desktop", "documents")
 FILE_ATTRIBUTE_HIDDEN, FILE_ATTRIBUTE_SYSTEM = 0x2, 0x4
+WINDOWS_FILES = {"desktop.ini", "thumbs.db", "ntuser.dat", "iconcache.db", "autorun.inf"}
 FIND_SECONDS = 3
 FIND_LIMIT = 20
 DELETE_LIMIT = 20
@@ -127,6 +128,9 @@ def check_place(path, change=True):
         parts = {p.lower() for p in Path(real).parts}
         if parts & PROTECTED_PARTS or Path(real).name.lower() in PROTECTED_FILES:
             return Result(False, f"{Path(real).name} belongs to Windows or Steam, so I won't change it.")
+        if _hidden_path(real):
+            # desktop.ini, Thumbs.db...: the live demo once renamed and recycled a Desktop's desktop.ini
+            return Result(False, f"{Path(real).name} is a hidden Windows file, so I won't change it.")
         if os.path.isdir(real) and _looks_installed(real):
             return Result(False, f"{Path(real).name} looks like an installed program or game. "
                                  "Use its uninstaller or change it yourself.")
@@ -250,7 +254,7 @@ def find(query, seconds=FIND_SECONDS, limit=FIND_LIMIT):
                 continue
             for entry in entries:
                 name = entry.name
-                if name.startswith(".") or name.lower() in SKIP_DIRS:
+                if name.startswith(".") or name.lower() in SKIP_DIRS or _hidden(entry):
                     continue
                 key = os.path.normcase(entry.path)
                 if key in seen or key in skip:
@@ -483,6 +487,16 @@ def organisable(where):
 def _hidden(entry):
     try:
         return bool(entry.stat().st_file_attributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM))
+    except (OSError, AttributeError):
+        return False
+
+
+def _hidden_path(path):
+    """A hidden or system file or folder (by its attributes), or one of Windows' own names."""
+    if Path(path).name.lower() in WINDOWS_FILES:
+        return True
+    try:
+        return bool(os.stat(path).st_file_attributes & (FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_SYSTEM))
     except (OSError, AttributeError):
         return False
 

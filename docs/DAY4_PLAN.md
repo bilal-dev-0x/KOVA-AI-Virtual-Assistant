@@ -226,6 +226,17 @@ Downloads folder".
   - Worked: the screenshot quota check (~2 s), the approvals, Roman Urdu answers, game advice from the real RAM/GPU
   - Still to test once Gemini's daily quota is back: the Save As flow, multi-step plans
 - [x] Commit (Bilal: one commit for everything); push after his OK
+- [x] Visible live demos (6 Nov, 16:39 and 16:49): Max ran 25 commands on the real PC while Bilal watched.
+  The first run found, and the second confirmed fixed:
+  - **desktop.ini was renamed and recycled** ("it" pointed at a find result): restored at once; hidden and system
+    files are now never found, renamed or deleted
+  - "type ..." longer than 8 words went to the brain: a clear command stays local however long ("and" inside
+    typed text is text; "then" still means two steps)
+  - "press backspace" was taken for a click
+  - the server had no create/rename/delete tools, and said "I've created a folder" after doing nothing: the
+    tools were added, and an answer claiming work no tool did is no longer spoken
+  - the server's history is shorter, so a small model stops repeating an old refusal
+  - second run: every step worked; the server saved a file on the Desktop in 28 s
 - [x] Fewer questions (Bilal: "har cheez pe na pooche"): typing, keys, ordinary clicks, create and rename no
   longer ask (undo or ctrl+z takes them back); in one plan, a kind of step said yes to once isn't asked again.
   Still asked: delete, closing apps, risky buttons (Delete/Send/Pay...), the AI's own screenshot, organising.
