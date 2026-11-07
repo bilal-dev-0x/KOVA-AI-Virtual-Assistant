@@ -81,6 +81,13 @@ def close_tab(name: str, title: str):
     return system_control.close_tab(name, title)
 
 
+@tool("Close every open browser tab whose title has these words, e.g. all YouTube tabs.",
+      params={"name": "Words of the tabs' titles, e.g. youtube"}, level=CONTROLLED,
+      confirm_text="close all {name} tabs")
+def close_tabs(name: str):
+    return system_control.close_tabs(name)
+
+
 @tool("The titles of an app's open windows, e.g. each Chrome window.", params={"name": "App name"})
 def list_windows(name: str):
     key, entry = system_control._resolve_app(name)

@@ -505,6 +505,42 @@ def switch_tab(query, step_seconds=0.25):
     return Result(False, f"I can't find a {shown} tab in your browser.")
 
 
+MAX_TABS_CLOSED = 15
+
+
+def close_tabs(query, wait_seconds=3):
+    """Close every open browser tab whose title has query's words ("close all youtube tabs"):
+    show one with switch_tab, close it with Ctrl+W, and again until none is left."""
+    closed = 0
+    for _ in range(MAX_TABS_CLOSED):
+        shown = switch_tab(query)
+        if not shown.success:
+            break
+        words = [w for w in title_words(query) if len(w) > 1 and w not in ("tab", "tabs", "all")]
+        front = next(((h, t) for h, t in app_windows(sorted(BROWSER_PROCESSES)) if title_has(t, words)), None)
+        if front is None:
+            break
+        hwnd, title = front
+        if not _bring_to_front(hwnd):
+            break
+        before = _tab_count(hwnd)
+        _press_ctrl_w()
+        deadline = time.time() + wait_seconds
+        while time.time() < deadline and _window_title(hwnd) == title:
+            time.sleep(0.2)
+        if _window_title(hwnd) == title:
+            # Two tabs with the same title ("(31) YouTube" twice): the title stays, the count drops
+            after = _tab_count(hwnd)
+            if not (before and after is not None and after < before):
+                break  # it didn't close: stop rather than press Ctrl+W on something else
+        closed += 1
+    name = " ".join(w for w in title_words(query) if w not in ("tab", "tabs", "all")) or "matching"
+    if not closed:
+        return Result(False, f"I can't find a {name} tab in your browser.")
+    log.info("Closed %s %s tab(s)", closed, name)
+    return Result(True, f"Closed {closed} {name} tab{'s' if closed > 1 else ''}.")
+
+
 def _window_title(hwnd):
     import ctypes
     user32 = ctypes.windll.user32
@@ -901,6 +937,8 @@ def spoken_path(text):
     drive, each part is matched against the folders that exist, forgiving small speech mistakes.
     """
     text = (text or "").strip().strip(".")
+    # Dashboard test: "d drive coding arc folder" fell through to a memory about another folder
+    text = re.sub(r"\s+(folder|directory)$", "", text, flags=re.IGNORECASE)
     if not text:
         return None
     text = _outside_in(text) or text

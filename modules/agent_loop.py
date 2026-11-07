@@ -13,7 +13,7 @@ MAX_STEPS = 6  # rounds of tool calls per request, so a confused plan can't run 
 # "I've created the folder", "I'll set a reminder", "Closing the PowerShell terminal": the KOVA server's
 # small model said all of these in live tests without running any tool. Each claim needs one of its
 # tools to have worked in this request, or the answer isn't spoken.
-CLOSE = {"close_app", "close_window", "close_tab", "force_close", "end_process", "close_terminals"}
+CLOSE = {"close_app", "close_window", "close_tab", "close_tabs", "force_close", "end_process", "close_terminals"}
 OPEN = {"open_app", "open_file", "open_folder", "new_window", "open_web_search", "play_music", "open_start_menu",
         "launch_game", "open_project"}
 MOVE = {"move_window", "side_by_side", "show_desktop"}

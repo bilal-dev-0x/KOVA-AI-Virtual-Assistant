@@ -191,9 +191,13 @@ proposed fixes as a diff.
 
 **Demo:** "open my KOVA project, what changed today, run the tests" → "gaming mode, launch <game>" → "done gaming".
 
-## Day 6 (Sun 8 Nov): Natural voice + dashboard 🎙️🖥️ — roadmap Phases 8 and 10
+## Day 6 (Sun 8 Nov): Natural voice + dashboard 🎙️🖥️ — roadmap Phases 8 and 10 ✅ BUILT (Core)
+*Built:* CustomTkinter dashboard, shared Agent worker, mic/PTT, live trace and approval dialogs, visible-only
+system stats, memory deletion through the existing tool, settings, system tray and configurable hotkey.
+Run with `python main.py --ui`. Automated coverage: 1236 tests passed; manual mic/tray testing remains for Bilal.
+
 **Core**
-- **Dashboard (PySide6;** CustomTkinter as a fallback):
+- **Dashboard (CustomTkinter):**
   - a chat panel and a mic button;
   - the **live agent trace**;
   - **approval pop-ups**;

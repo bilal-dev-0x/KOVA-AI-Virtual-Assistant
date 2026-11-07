@@ -28,6 +28,7 @@ def no_real_windows(monkeypatch):
     monkeypatch.setattr(windows, "visible_windows", lambda: [])
     monkeypatch.setattr(windows, "_press_win_d", lambda: None)
     monkeypatch.setattr(windows, "_own_windows", lambda: set())
+    monkeypatch.setattr(windows, "_ours", lambda hwnd: False)
     monkeypatch.setattr(windows, "_active_popup", lambda hwnd: None)
 
     def no_screenshots(*args, **kwargs):

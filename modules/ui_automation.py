@@ -164,6 +164,10 @@ def _one(controls, name, app, editable):
     found = _matches(controls, name, editable)
     if not found and editable and spoken_name(name) in GENERIC_FIELDS:
         found = [c for c in controls if c.kind in EDITABLE]
+        # A Save As dialog has a search box and name columns too, but "the field" there means the file name
+        file_name = [c for c in found if spoken_name(c.name) == "file name"]
+        if len(found) > 1 and len(file_name) == 1:
+            found = file_name
         if len(found) > 1:
             names = ", ".join(c.name or "no name" for c in found[:5])
             return Result(False, f"{app} has {len(found)} text fields: {names}. Say which one.", halt=True)
