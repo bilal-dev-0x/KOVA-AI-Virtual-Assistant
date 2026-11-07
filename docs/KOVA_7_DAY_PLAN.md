@@ -239,6 +239,12 @@ Run with `python main.py --ui`. Automated coverage: 1236 tests passed; manual mi
 ---
 
 ## Backlog (after Day 7, or on a day that finishes early)
+- **Planned, not built (written 7 Nov):**
+  - **New UI** (PyWebView, dark, with a floating pill): `docs/UI_DESIGN_PLAN.md`. The old window stays as `--ui-classic`.
+  - **Personas Max (male) and Mira (female), human-like replies, Mini Reaper avatar:** `docs/PERSONA_AVATAR_PLAN.md`.
+  - **Gemini Live** (natural real-time voice, interrupt Max mid-sentence, behind `VOICE_MODE: "live"`): the Day 6 Advanced
+    item, moved here. Reason: Gemini's free quota runs out early in a day, and the new UI and personas come first.
+    The current voice pipeline stays the default and the fallback.
 - **KOVA server brain ✅ BUILT (6 Nov, after the Day 4 live test ran Gemini dry by 1 pm):**
   - `brain/server.py`: the old laptop's Ollama with a new `kova-cmd` model (qwen3 4B instruct, `num_ctx` 6144,
     `think` off), over the cable (`192.168.50.2`) with Tailscale (`100.109.31.1`) as the way round. No model
