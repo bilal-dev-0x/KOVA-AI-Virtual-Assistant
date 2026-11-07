@@ -454,7 +454,8 @@ class Agent:
                     self.help, help="help"),
             Command("greet", r"^(?=.)((hello|hi|hey|good (morning|afternoon|evening)|salam|assalam ?o? ?alaikum|aoa)( there)? ?)?"
                              r"((how are you|how r u|how are you doing|hows it going|how is it going|kaise ho|kese ho"
-                             r"|kaisay ho|kaise hain|kya haal hai|kia haal hai|kya hal hai)( tum| aap| ap| bhai| yaar)?)?$",
+                             r"|kaisay ho|kaise hain|kya haal hai|kia haal hai|kya hal hai)( tum| aap| ap| bhai| yaar)?"
+                             r"( today| doing today| this (morning|evening))?)?$",
                     self.greet),
             # Which brain answers: Gemini, or the KOVA server's two models
             Command("brain", r"\b(which|what)( is)?( your)? (model|brain|ai|llm)( name| are you| do you use"
@@ -552,6 +553,9 @@ class Agent:
                                        r" code|code editor|ps4 vs4|vs 4|v s code)$",
                     self.open_in_code, help="open <file or folder> in vs code"),
             # "open the whatsapp tab in the existing chrome window", "switch to the gmail tab"
+            # Dashboard test: "close all youtube tabs" went to the AI, which could close only one
+            Command("close tabs", r"^close( all)?( the| my)?( open)? (?P<arg>.+?) tabs$",
+                    lambda arg: tool("close_tabs", name=arg), help="close all youtube tabs"),
             Command("switch tab", r"^(switch|go|change|move) to( the| my)? (?P<arg>.+?) tab( in( the)?( existing| open)?"
                                   r"( chrome| edge| brave| browser)( window)?)?$"
                                   r"|^(open|show)( the| my)? (?P<arg2>.+?) tab in( the)?( existing| open)?"
@@ -589,7 +593,7 @@ class Agent:
                                       r"( on my (pc|computer|laptop))?$",
                     lambda arg: tool("open_folder", path=files.place(arg)), help="open my downloads"),
             Command("open folder", r"^(open|show)( me)?( my| the)? (?P<arg>.+? (folder|directory))( now| for me| again)?$"
-                                   r"|^open (?P<arg2>[a-z] drive\b.*)$",
+                                   r"|^open (?P<arg2>[a-z] drive\b.*)$|^open( the| my)? folder (?P<arg3>.+)$",
                     self.open_folder, help="open my project folder / open D drive coding arc"),
             # ---------- Day 5: games ----------
             Command("list games", r"^(which|what) games (are installed|do i have|are on my (pc|computer|laptop)|can i play)"
@@ -605,6 +609,9 @@ class Agent:
             # "launch valorant" goes through "open": an app if there is one, else the game of that name
             Command("launch game", r"^(launch|start|run|play|open)( the| my)? game (?P<arg>.+)$", self.launch_game,
                     help="launch <game>"),
+            # Dashboard test: "open youtube in a new tab" looked for an app called "youtube in a new tab"
+            Command("open in tab", r"^open (?P<arg>.+?) in (a )?new (browser )?tab$",
+                    lambda arg: tool("open_app", name=arg)),
             Command("open", r"^(open|launch|start)( (?P<arg>.+))?$",
                     lambda arg: tool("open_app", name=arg), help="open <app or website>", ask_text="Open what?"),
             # "force close calculator", "close it anyway", "force it" after a close failed
@@ -1059,6 +1066,10 @@ class Agent:
                 return Result(False, f"I remember {memory_engine.as_you(found[0][1].text)}, "
                                      "but I can't find that folder on this PC.")
             if not found:
+                # "open the folder old notes": a folder anywhere in your folders, by its name
+                folder = files.find_folder(re.sub(r"\s+(folder|directory)$", "", said))
+                if folder:
+                    return self._tool("open_folder", path=folder)
                 if self.provider:
                     return self._ask_agent(self.raw_text)
                 return Result(False, f"I don't know where your {said} is. "

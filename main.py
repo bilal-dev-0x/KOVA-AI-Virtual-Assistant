@@ -242,6 +242,7 @@ def run_voice(agent):
 def main():
     parser = argparse.ArgumentParser(description="KOVA desktop assistant")
     parser.add_argument("--text", action="store_true", help="type commands instead of speaking")
+    parser.add_argument("--ui", action="store_true", help="open the KOVA dashboard")
     parser.add_argument("--mic-test", action="store_true", help="show live mic levels and a suggested threshold")
     args = parser.parse_args()
 
@@ -267,11 +268,16 @@ def main():
         while True:
             # "restart yourself" comes back here with config.json read again
             agent = Agent(load_config())
-            log.info("KOVA started in %s mode", "text" if args.text else "voice")
-            if agent.config.get("ALERTS_ON"):
+            mode = "dashboard" if args.ui else "text" if args.text else "voice"
+            log.info("KOVA started in %s mode", mode)
+            if agent.config.get("ALERTS_ON") and not args.ui:
                 alerts.start(agent.config)
             try:
-                result = run_text(agent) if args.text else run_voice(agent)
+                if args.ui:
+                    from ui.run import run_ui
+                    result = run_ui(agent, is_yes=is_yes)
+                else:
+                    result = run_text(agent) if args.text else run_voice(agent)
             finally:
                 alerts.stop()
             if not (result and result.restart):

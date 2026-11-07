@@ -93,7 +93,7 @@ def target_window():
     terminal Max runs in (in text mode that terminal is in front while you type), or None."""
     own = _own_windows()
     for hwnd, process, title in visible_windows():
-        if hwnd not in own and not _is_minimised(hwnd):
+        if hwnd not in own and not _is_minimised(hwnd) and not _ours(hwnd):
             # A dialog it opened (Save As, "Do you want to save?") is owned, so it isn't in the
             # list; while it is up, it is what you're looking at
             popup = _active_popup(hwnd)
@@ -506,6 +506,18 @@ def _own_windows():
     GW_OWNER, GA_ROOTOWNER = 4, 3
     handle = _h(console)
     return {h for h in (console, user32.GetWindow(handle, GW_OWNER), user32.GetAncestor(handle, GA_ROOTOWNER)) if h}
+
+
+def _ours(hwnd):
+    """True for a window of this very process: the dashboard (--ui) is in front while you type,
+    but "save this file" means the window behind it."""
+    if os.name != "nt":
+        return False
+    import ctypes
+    user32, _, _ = _dlls()
+    pid = ctypes.c_ulong()
+    user32.GetWindowThreadProcessId(_h(hwnd), ctypes.byref(pid))
+    return pid.value == os.getpid()
 
 
 def _active_popup(hwnd):

@@ -116,6 +116,7 @@ class HybridSession(Session):
         self.tools = tools
         self._sessions = {"primary": provider.primary.session(system_prompt, tools), "backup": None}
         self.active = "primary"
+        self._text = ""
 
     def _session(self, which):
         if self._sessions[which] is None:
@@ -123,6 +124,7 @@ class HybridSession(Session):
         return self._sessions[which]
 
     def send(self, text):
+        self._text = text
         if self.provider.primary_ok():
             self.provider.warm_backup(self.system_prompt, self.tools)
             self.active = "primary"
@@ -140,7 +142,23 @@ class HybridSession(Session):
 
     def send_results(self, results):
         # Tool results go back to the brain that asked for them: the other one never saw the calls
-        return self._session(self.active).send_results(results)
+        if self.active == "backup":
+            return self._session("backup").send_results(results)
+        try:
+            return self._session("primary").send_results(results)
+        except BrainError as e:
+            # Dashboard test: Gemini asked for a tool, then was busy for its result. The server starts
+            # the request over, told what already ran, so nothing is done twice
+            self._session("primary").reset()
+            self.provider.primary_failed(e)
+        ran = "; ".join(f"{call.name} -> {str((answer or {}).get('message', answer))[:200]}"
+                        for call, answer in results)
+        self.active = "backup"
+        self.provider.wait_for_warm_up()
+        try:
+            return self._session("backup").send(f"{self._text}\n(These steps already ran, don't repeat them: {ran})")
+        except BrainError as e:
+            raise BrainError(f"Gemini can't answer right now, and {str(e)[0].lower()}{str(e)[1:]}") from e
 
     def reset(self):
         for session in self._sessions.values():

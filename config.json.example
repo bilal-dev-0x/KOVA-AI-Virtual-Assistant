@@ -28,5 +28,8 @@
   "SERVER_MODEL": "kova-cmd",
   "SERVER_CHAT_MODEL": "kova-chat",
   "SPEECH_MIN_CONFIDENCE": 0.35,
-  "VOICE": "female"
+  "GEMINI_TIMEOUT": 20,
+  "VOICE": "female",
+  "ALERTS_ON": false,
+  "PTT_HOTKEY": "Ctrl+Alt+M"
 }

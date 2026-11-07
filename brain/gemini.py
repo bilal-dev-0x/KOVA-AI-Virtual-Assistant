@@ -52,7 +52,8 @@ class GeminiProvider(Provider):
             from google.genai import types
             self._client = genai.Client(
                 api_key=self.config["GEMINI_API_KEY"],
-                http_options=types.HttpOptions(timeout=60_000)
+                # Dashboard test: a hung model held a reply for 60 s before the next one was tried
+                http_options=types.HttpOptions(timeout=int(self.config.get("GEMINI_TIMEOUT", 20)) * 1000)
             )
         return self._client
 
@@ -127,7 +128,8 @@ class GeminiProvider(Provider):
                 model=model, contents=query, config=config))
         except BrainError as e:
             log.warning("Google Search grounding unavailable: %s", e)
-            self.search_available = False
+            if "busy" not in str(e):  # busy is for a minute; a quota of 0 is for good
+                self.search_available = False
             return None
         return _text(response) or None
 

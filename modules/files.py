@@ -337,8 +337,24 @@ def _missing(ref):
 
 # ---------- open, create, rename ----------
 
+def find_folder(name):
+    """The one folder called name in your folders, or None (none, or more than one)."""
+    if not _query_words(name or ""):
+        return None
+    result = find(name)
+    folders = [h for h in _found if os.path.isdir(h)] if result.success else []
+    return folders[0] if len(folders) == 1 else None
+
+
 def open_item(ref):
     path = pick(ref)
+    if path is None and (ref or "").lower().strip() not in ("it", "that", "this"):
+        # Dashboard test: "open the file budget plan final" with no find before it. Look for it now:
+        # one hit opens, more than one is listed to pick from
+        found = find(ref)
+        if found.success and len(_found) > 1:
+            return found
+        path = _found[0] if found.success else None
     if path is None or not os.path.exists(path):
         return _missing(ref)
     problem = check_place(path, change=False)
