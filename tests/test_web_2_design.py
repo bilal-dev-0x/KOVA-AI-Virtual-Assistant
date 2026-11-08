@@ -50,11 +50,22 @@ def test_the_rail_names_all_eight_screens_with_icons():
         assert f'<symbol id="{symbol}"' in HTML   # every icon used is defined here
 
 
-def test_screens_without_a_backend_say_so_and_have_no_buttons():
-    for page in ("apps", "files", "system"):
-        body = HTML[HTML.index(f'id="page-{page}"'):]
-        body = body[:body.index("</section>")]
-        assert "Not built yet." in body and "<button" not in body and "<input" not in body
+def test_phase_c_screens_have_real_data_controls():
+    assert "Not built yet." not in HTML
+    for element in ("apps-search", "apps-list", "files-folder", "files-list",
+                    "system-status", "system-processes", "activity-list"):
+        assert f'id="{element}"' in HTML
+    for method in ("api.apps", "api.files", "api.system", "api.activity"):
+        assert method in JS
+
+
+def test_phase_c_live_review_polish_rules_exist():
+    assert "scrollbar-color: var(--surface-2) var(--bg)" in CSS
+    assert "::-webkit-scrollbar-thumb" in CSS
+    assert "function formatActivityTime" in JS
+    assert 'return "Today " + clock' in JS
+    assert 'return "Yesterday " + clock' in JS
+    assert "#page-files.page.is-active, #page-activity.page.is-active { gap: var(--s2); }" in CSS
 
 
 def test_the_companion_clip_is_local_and_stops_when_unseen():

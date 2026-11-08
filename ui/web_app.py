@@ -1,13 +1,16 @@
 import json
 import os
 import threading
+import time
 
 from desktop_agent import wake_words_from
 from modules.logger import get_logger
 from ui import memory as memory_tab
+from ui import history as history_tab
 from ui import messages as messages_tab
 from ui import settings as settings_tab
 from ui import stats as stats_tab
+from ui import data as data_tab
 
 # The new dashboard window: PyWebView (Edge WebView2) showing ui/web/. Only the
 # window layer of the classic CustomTkinter app is replaced here — the same
@@ -25,7 +28,8 @@ from ui import stats as stats_tab
 log = get_logger()
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
-BUFFER_KEEP = 500     # events held until the page has loaded, oldest first
+BUFFER_KEEP = 500
+ERROR_SHOWN_SECONDS = 6   # how long "Request failed" stays before the real state shows again
 
 # Max's states, the ones the classic window showed, now as a short key the page
 # turns into a colour.
@@ -33,7 +37,10 @@ STATES = {"idle": ("Ready", "idle"),
           "asleep": ("Asleep — say the wake word", "asleep"),
           "awake": ("Listening", "listening"),
           "listening": ("Listening", "listening"),
-          "working": ("Thinking...", "working"),
+          "thinking": ("Thinking", "thinking"),
+          "working": ("Working", "working"),
+          "approval": ("Waiting for approval", "approval"),
+          "error": ("Request failed", "error"),
           "muted": ("Voice off", "muted")}
 
 # What a dialog answers when nobody is left to answer it: closing a confirm is
@@ -168,6 +175,69 @@ class JsApi:
         """Every fact, as (id, text) rows, straight back to the page."""
         return [[row_id, text] for row_id, text in memory_tab.rows()]
 
+    def history(self):
+        """The local conversation, only what the Assistant screen needs."""
+        return history_tab.all_messages()
+
+    def apps(self, query=""):
+        """Installed Start-menu apps with a live running flag."""
+        return data_tab.applications(query)
+
+    def files(self, folder="", query=""):
+        """Safe folder listing or bounded search below one allowed folder."""
+        return data_tab.files_view(folder, query)
+
+    def system(self):
+        """One real system snapshot; the page calls it only while System is open."""
+        return data_tab.system_status(self._dashboard._last_reading)
+
+    def activity(self, limit=100):
+        """Recent action records, with no raw arguments exposed to the page."""
+        return data_tab.activity(self._dashboard.agent, limit)
+
+    def launch_app(self, name):
+        """Queue an installed app launch through the Agent's ordinary command path."""
+        from modules import system_control
+        available = system_control.start_menu_apps()
+        exact = next((display for display, _ in available.values()
+                      if display.casefold() == str(name or "").strip().casefold()), None)
+        if exact is None:
+            return {"queued": False, "message": "That app is not in the Start menu list."}
+        queued = self._dashboard.controller.submit(f"open {exact}", source="ui")
+        return {"queued": bool(queued), "message": "Request sent to Max." if queued else "Max is closing."}
+
+    def file_action(self, action, path):
+        """Queue open/show/delete through existing Agent commands and checks."""
+        from modules import files as file_tools
+        action = str(action or "").lower()
+        if action not in {"open", "show", "delete"}:
+            return {"queued": False, "message": "Unknown file action."}
+        if not isinstance(path, str) or not path:
+            return {"queued": False, "message": "Choose a file or folder first."}
+        target = os.path.realpath(path)
+        if file_tools._hidden_path(target):
+            return {"queued": False, "message": "Hidden and system files are not available here."}
+        problem = file_tools.check_place(target, change=(action == "delete"))
+        if problem:
+            return {"queued": False, "message": problem.message}
+        if not any(file_tools._inside(target, root) for root in file_tools.allowed_roots()):
+            return {"queued": False, "message": "That path is outside KOVA's allowed folders."}
+        if action == "show":
+            command = f"open folder {os.path.dirname(target)}"
+        elif action == "delete":
+            command = f"delete {target}"
+        elif os.path.isdir(target):
+            command = f"open folder {target}"
+        else:
+            command = f"open file {target}"
+        queued = self._dashboard.controller.submit(command, source="ui")
+        return {"queued": bool(queued), "message": "Request sent to Max." if queued else "Max is closing."}
+
+    def undo(self):
+        """Ask the existing Agent to undo its latest reversible action."""
+        queued = self._dashboard.controller.submit("undo", source="ui")
+        return {"queued": bool(queued), "message": "Undo request sent to Max." if queued else "Max is closing."}
+
     def forget(self, fact_id):
         """Forget one fact the safe way, through the worker: the approval
         dialog may come up, and the fresh list follows whatever the tool does."""
@@ -216,6 +286,9 @@ class WebDashboard:
         self._buffer = []                     # events waiting for the page to load
         self._lock = threading.Lock()         # buffer and ready
         self._shown_state = None
+        self._status_override = None
+        self._error_until = 0.0
+        self._last_reading = None
         self._bound = {}                      # <Map> / <Unmap> hooks for run_ui
         self._prompt_token = 0                # one dialog at a time, known by token
         self._open_token = None
@@ -304,7 +377,10 @@ class WebDashboard:
         self._eval(js_receive(event))
 
     def _mirror_state(self):
-        state = self.controller.state
+        if self._status_override == "error" and time.monotonic() > self._error_until:
+            # A failed request is news for a few seconds, not a state Max stays in
+            self._status_override = None
+        state = self._status_override or self.controller.state
         if state != self._shown_state:
             self._shown_state = state
             self._push(state_event(state))
@@ -369,17 +445,39 @@ class WebDashboard:
         self._push({"t": "notice", "text": message})
 
     def show_user(self, text):
-        self._push({"t": "chat", "who": "user", "text": text})
+        self._status_override = None
+        self._shown_state = None
+        saved = history_tab.append("user", text)
+        self._push({"t": "chat", "who": "user", "text": text,
+                    "id": saved.get("id") if saved else None})
 
     def show_result(self, result, source):
         lines = messages_tab.answer_lines(result)
         if lines:
-            self._push({"t": "chat", "who": "max", "text": "\n".join(lines),
-                        "note": None if result.success else "couldn't do that"})
+            text = "\n".join(lines)
+            saved = history_tab.append("max", text)
+            self._push({"t": "chat", "who": "max", "text": text,
+                        "note": None if result.success else "couldn't do that",
+                        "id": saved.get("id") if saved else None})
+            if source == "ui":
+                self._push({"t": "screen-result", "text": text,
+                            "success": bool(result.success)})
+        self._status_override = None if result.success else "error"
+        self._error_until = time.monotonic() + ERROR_SHOWN_SECONDS
+        self._shown_state = None
+        if self._status_override:
+            self._mirror_state()
         if (result.stop or result.restart) and self.on_exit:
             self.on_exit(result)
 
     def show_trace(self, line):
+        stripped = (line or "").lstrip()
+        if stripped.startswith("→"):
+            self._status_override = "working"
+            self._shown_state = None
+        elif stripped.startswith("←"):
+            self._status_override = "thinking"
+            self._shown_state = None
         self._push({"t": "trace", "line": line})
 
     def show_memory(self):
@@ -401,6 +499,7 @@ class WebDashboard:
     def _on_stats(self, reading):
         """One reading, on the sampler thread: the main-drive read belongs
         here, never on the pump. The packed event goes through the bridge."""
+        self._last_reading = dict(reading)
         event = {"t": "stats", "rings": ring_percentages(reading, self._disk_reader())}
         self.controller.bridge.post(self.show_stats, event)
 
@@ -419,6 +518,9 @@ class WebDashboard:
         answers the same, so the worker can never hang on a dead page."""
         if not self._alive or not self._ready:
             return DEFAULT_ANSWERS.get(kind)
+        self._status_override = "approval"
+        self._shown_state = None
+        self._mirror_state()
         with self._lock:
             self._prompt_token += 1
             token = self._prompt_token
@@ -429,10 +531,14 @@ class WebDashboard:
         while not answered.wait(0.1):
             if not self._alive or self.controller.bridge.closed:
                 self._drop_prompt()
+                self._status_override = None
+                self._shown_state = None
                 return DEFAULT_ANSWERS.get(kind)
         with self._lock:
             answer = self._prompt_answer
             self._drop_prompt_locked()
+        self._status_override = "thinking"
+        self._shown_state = None
         return answer
 
     def _drop_prompt_locked(self):

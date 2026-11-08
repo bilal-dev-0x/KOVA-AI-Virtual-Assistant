@@ -110,6 +110,7 @@ def make_dashboard():
         controller, controller.agent, stats_factory=lambda push: sampler,
         create_window=lambda **kw: window.register_kwargs(kw))
     dashboard._pump_stop.set()   # the test drives pump ticks by hand
+    dashboard._pump_thread.join(timeout=0.2)
     return dashboard, window, controller, sampler
 
 
@@ -155,7 +156,11 @@ def test_js_events_are_safe_and_round_trip():
 
 def test_state_events_carry_a_label_and_tone():
     assert web_app.state_event("working") == {
-        "t": "state", "state": "working", "text": "Thinking...", "tone": "working"}
+        "t": "state", "state": "working", "text": "Working", "tone": "working"}
+    assert web_app.state_event("thinking") == {
+        "t": "state", "state": "thinking", "text": "Thinking", "tone": "thinking"}
+    assert web_app.state_event("approval")["tone"] == "approval"
+    assert web_app.state_event("error")["tone"] == "error"
     assert web_app.state_parts("asleep") == ("Asleep — say the wake word", "asleep")
     assert web_app.state_parts("mystery") == ("mystery", "idle")
 
@@ -196,7 +201,11 @@ def test_events_before_the_page_loads_are_buffered_in_order():
         dashboard._tick()
         payloads = js_values(window)
         assert payloads[0]["t"] == "boot"   # the boot facts ride in first
-        assert payloads[1:] == [{"t": "chat", "who": "user", "text": "who greeted first"},
+        assert payloads[1]["t"] == "chat"
+        assert payloads[1]["who"] == "user"
+        assert payloads[1]["text"] == "who greeted first"
+        assert payloads[1]["id"]
+        assert payloads[2:] == [
                                 {"t": "trace", "line": "trace line"}]
     finally:
         dashboard.destroy()
@@ -212,8 +221,11 @@ def test_answer_and_trace_events_keep_their_shape():
         controller.bridge.next_call(timeout=0)
         controller.bridge.next_call(timeout=0)
         payloads = js_values(window)
-        assert payloads[0] == {"t": "chat", "who": "max",
-                               "text": "First line\nSecond line\nThird", "note": None}
+        assert payloads[0]["t"] == "chat"
+        assert payloads[0]["who"] == "max"
+        assert payloads[0]["text"] == "First line\nSecond line\nThird"
+        assert payloads[0]["note"] is None
+        assert payloads[0]["id"]
         assert payloads[1] == {"t": "trace", "line": "→ flip_light_switch({})"}
     finally:
         dashboard.destroy()
@@ -250,7 +262,7 @@ def test_state_changes_arrive_only_when_they_change_while_visible():
         dashboard._tick()   # nothing changed: nothing new is sent
         states = [p for p in js_values(window) if p["t"] == "state"]
         assert states == [{"t": "state", "state": "working",
-                           "text": "Thinking...", "tone": "working"}]
+                           "text": "Working", "tone": "working"}]
         controller._state = "idle"
         dashboard._tick()
         states = [p for p in js_values(window) if p["t"] == "state"]

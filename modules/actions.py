@@ -87,6 +87,7 @@ class ActionRunner:
             "approval": approval,
             "success": result.success,
             "message": result.message,
+            "undo_text": result.undo_text if result.undo else None,
         }
         path = self.log_path or ACTIONS_LOG
         try:

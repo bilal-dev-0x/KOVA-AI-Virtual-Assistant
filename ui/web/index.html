@@ -89,7 +89,7 @@
     <!-- Assistant: the conversation -->
     <section class="page" id="page-assistant" aria-labelledby="assistant-title">
       <header class="page-head"><h1 class="page-title" id="assistant-title">Assistant</h1><span class="page-note" id="assistant-note"></span></header>
-      <div class="chat" id="chat-log" aria-live="polite"><p class="empty" id="chat-empty">Type below, or say the wake word. Answers to spoken requests are also spoken.</p></div>
+      <div class="chat" id="chat-log" aria-live="polite"><p class="empty" id="chat-empty">Your recent conversation stays on this PC. Type below, or say the wake word.</p></div>
       <div class="askbar">
         <input id="ask-input" class="ask-input" type="text" autocomplete="off" spellcheck="false" placeholder="Message Max">
         <button id="ask-mic" class="icon-btn" type="button" title="Listen once (Ctrl+Alt+M)" aria-label="Listen once"><svg class="icon"><use href="#i-mic"/></svg></button>
@@ -97,24 +97,30 @@
       </div>
     </section>
 
-    <!-- Screens that have no backend yet say so plainly (prompt.txt: no fake controls) -->
     <section class="page" id="page-apps" aria-labelledby="apps-title">
-      <header class="page-head"><h1 class="page-title" id="apps-title">Applications</h1></header>
-      <div class="planned"><p>Not built yet.</p><p class="page-note">This screen will list the apps installed on this PC, search them and start them. Until then, ask Max: "open chrome".</p></div>
+      <header class="page-head"><h1 class="page-title" id="apps-title">Applications</h1><button id="apps-refresh" class="icon-btn" type="button" title="Refresh" aria-label="Refresh"><svg class="icon"><use href="#i-refresh"/></svg></button></header>
+      <div class="screen-tools"><input id="apps-search" class="settings-input" type="search" autocomplete="off" placeholder="Search installed apps"><span id="apps-count" class="page-note"></span></div>
+      <p id="apps-status" class="screen-status" role="status"></p>
+      <div class="data-list" id="apps-list"></div>
     </section>
     <section class="page" id="page-files" aria-labelledby="files-title">
-      <header class="page-head"><h1 class="page-title" id="files-title">Files</h1></header>
-      <div class="planned"><p>Not built yet.</p><p class="page-note">This screen will browse and search your folders and open files. Until then, ask Max: "find my cv".</p></div>
+      <header class="page-head"><h1 class="page-title" id="files-title">Files</h1><button id="files-refresh" class="icon-btn" type="button" title="Refresh" aria-label="Refresh"><svg class="icon"><use href="#i-refresh"/></svg></button></header>
+      <div class="screen-tools"><select id="files-folder" class="settings-input" aria-label="Choose a folder"></select><button id="files-up" class="dialog-btn" type="button" disabled>Up</button><input id="files-search" class="settings-input" type="search" autocomplete="off" placeholder="Search inside this folder"><button id="files-search-button" class="dialog-btn" type="button">Search</button></div>
+      <p id="files-location" class="data-meta"></p>
+      <p id="files-status" class="screen-status" role="status"></p>
+      <div class="data-list" id="files-list"></div>
     </section>
     <section class="page" id="page-system" aria-labelledby="system-title">
-      <header class="page-head"><h1 class="page-title" id="system-title">System</h1></header>
-      <div class="planned"><p>Not built yet.</p><p class="page-note">This screen will show CPU, memory, disk, battery, GPU and the busiest programs. Home already shows the first three live.</p></div>
+      <header class="page-head"><h1 class="page-title" id="system-title">System</h1><span class="page-note" id="system-updated"></span></header>
+      <div id="system-status" class="system-grid"></div>
+      <section class="panel process-panel"><h2 class="panel-title">Top memory use</h2><div id="system-processes" class="data-list"></div></section>
     </section>
 
-    <!-- Activity: every tool Max runs, live -->
     <section class="page" id="page-activity" aria-labelledby="activity-title">
-      <header class="page-head"><h1 class="page-title" id="activity-title">Activity</h1><span class="page-note">Every tool Max runs in this session, as it runs.</span></header>
-      <div class="trace" id="trace" aria-live="polite"><p class="empty" id="trace-empty">No tools have run yet.</p></div>
+      <header class="page-head"><h1 class="page-title" id="activity-title">Activity</h1><button id="activity-refresh" class="icon-btn" type="button" title="Refresh" aria-label="Refresh"><svg class="icon"><use href="#i-refresh"/></svg></button></header>
+      <p class="page-note">Recent actions from KOVA's local log.</p>
+      <p id="activity-status" class="screen-status" role="status"></p>
+      <div class="data-list" id="activity-list" aria-live="polite"></div>
     </section>
 
     <section class="page" id="page-memory" aria-labelledby="memory-title">
@@ -134,6 +140,8 @@
 
   </main>
 </div>
+
+<div id="screen-result" class="screen-result" role="status" aria-live="polite"></div>
 
 <!-- the approval sheet: one at a time, one token at a time -->
 <div class="overlay" id="overlay" hidden>

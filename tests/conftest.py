@@ -72,6 +72,8 @@ def isolated_files(monkeypatch, tmp_path):
     monkeypatch.setattr(voice_handler, "_gender", voice_handler._gender)
     from modules import memory_engine
     monkeypatch.setattr(memory_engine, "DB_FILE", tmp_path / "memory.db")
+    from ui import history as ui_history
+    monkeypatch.setattr(ui_history, "HISTORY_FILE", tmp_path / "ui-history.jsonl")
     # No test runs your routines.json or the example: routine tests write their own
     from modules import alerts, routines
     monkeypatch.setattr(routines, "ROUTINES_FILE", tmp_path / "routines.json")

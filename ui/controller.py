@@ -36,7 +36,7 @@ class Controller:
         self.muted = False
         self._source = None             # where the request in hand came from
         self._jobs = []
-        self._state = "idle"            # idle | working | listening
+        self._state = "idle"            # idle | thinking | working | approval | listening
         self._lock = threading.Lock()
         self._worker = None
         self._closing = False
@@ -104,7 +104,7 @@ class Controller:
             if self._closing:
                 return False
             self._jobs.append(job)
-            self._state = "listening" if job[0] == "mic" else "working"
+            self._state = "listening" if job[0] == "mic" else "thinking"
             if self._worker is None or not self._worker.is_alive():
                 self._worker = threading.Thread(target=self._work, name="kova-ui-agent", daemon=True)
                 self._worker.start()
@@ -121,6 +121,7 @@ class Controller:
             self._run(job)
 
     def _run(self, job):
+        source = job[2] if job[0] == "say" else "mic" if job[0] == "mic" else "ui"
         try:
             if job[0] == "mic":
                 self._record_and_handle()
@@ -136,6 +137,7 @@ class Controller:
         except Exception:
             # A broken request must not kill the worker the window depends on
             log.exception("Request failed")
+            self._finish(Result(False, "I couldn't complete that request. Please try again."), source)
 
     def _record_and_handle(self):
         heard = self.listen()
@@ -146,7 +148,7 @@ class Controller:
 
     def _handle(self, text, source):
         with self._lock:
-            self._state = "working"
+            self._state = "thinking"
         if self.on_user:
             self.bridge.post(self.on_user, text)
         self._source = source
@@ -180,6 +182,16 @@ class Controller:
         return answer if isinstance(answer, str) else None
 
     def trace(self, line):
+        stripped = (line or "").lstrip()
+        if stripped.startswith("→"):
+            phase = "working"
+        elif stripped.startswith("←"):
+            phase = "thinking"
+        else:
+            phase = None
+        if phase:
+            with self._lock:
+                self._state = phase
         if self.on_trace:
             self.bridge.post(self.on_trace, line)
 
@@ -189,9 +201,19 @@ class Controller:
         Runs on the worker thread. A closed bridge, a window going away or a
         dialog nobody opened all answer "no" instead of waiting forever.
         """
+        with self._lock:
+            self._state = "approval"
         if self._source in SPOKEN and self.voice_prompt and not self.muted:
-            return self.voice_prompt(kind, question)  # asked by voice, answered by voice
+            try:
+                return self.voice_prompt(kind, question)  # asked by voice, answered by voice
+            finally:
+                with self._lock:
+                    if not self._closing:
+                        self._state = "thinking"
         if self.prompt is None or self.bridge.closed:
+            with self._lock:
+                if not self._closing:
+                    self._state = "thinking"
             return None
         answered = threading.Event()
         answer = []
@@ -202,9 +224,17 @@ class Controller:
             finally:
                 answered.set()
 
-        if not self.bridge.post(open_prompt):
-            return None
-        while not answered.wait(0.1):
-            if self.bridge.closed:
+        try:
+            if not self.bridge.post(open_prompt):
                 return None
-        return answer[0] if answer else None
+            while not answered.wait(0.1):
+                if self.bridge.closed:
+                    return None
+            return answer[0] if answer else None
+        finally:
+            # Every way out of an approval round-trip must leave the status
+            # truthful. In particular, a closed bridge must not strand the UI
+            # on "Waiting for approval".
+            with self._lock:
+                if not self._closing:
+                    self._state = "thinking"

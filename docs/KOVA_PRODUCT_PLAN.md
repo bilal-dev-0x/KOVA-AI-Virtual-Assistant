@@ -1,6 +1,6 @@
 # KOVA product plan: audit and design (prompt.txt, Prompt 2)
 
-Written 8 Nov 2026. Plan only: nothing in this file is built yet. Prompt 3 builds it in the phases of section 8.
+Written 8 Nov 2026. This document records the audit and staged product plan; implementation status is tracked in section 8 and the phase reports.
 Toolkit used: Anthropic **frontend-design** guidance (read in full and applied below); **Playwright** with the
 installed Edge for page screenshots. Taste was dropped (Bilal, 8 Nov); Visual Eyes was not installed (its installer
 pipes a downloaded script into bash) and is replaced by the same Playwright screenshot loop.
@@ -26,10 +26,10 @@ pipes a downloaded script into bash) and is replaced by the same Playwright scre
   Controller (one worker thread), Bridge, VoiceLoop (always-on voice), tray, hotkey `Ctrl+Alt+M`.
 
 ### Incomplete or placeholder
-- The web dashboard has Home, Activity (live trace only, not history), Memory, Settings. **No** Assistant
-  screen of its own, **no** Applications, Files or System screens.
-- **Activity** shows only this session's trace, not `logs/actions.jsonl`.
-- **Conversation history** is not kept between runs.
+- The web dashboard has Home, Assistant, Applications, Files, System, Activity, Memory and Settings.
+- **Activity** reads the local `logs/actions.jsonl`; the Home panel continues to show this session's live tool trace.
+- **Conversation history** is now kept locally between runs (Phase B); it retains up to 500 messages and
+  skips exchanges detected as containing credentials.
 - **Personas**: only the voice switches male/female; no Max/Mira profile, no wording or avatar change.
 - **Mascot**: not used anywhere in the app. Only `design/mockup_v1/` (a static page) shows it.
 - **Floating companion**: not built.
@@ -124,8 +124,10 @@ Unchanged rule: understand -> plan -> permission -> run a registered tool -> rea
 
 ## 8. Implementation phases (Prompt 3)
 A. Shell: rail, router, tokens, the eight screens as real routes, responsive rule. Mascot in Home (idle only).
-B. Assistant screen: history file, thinking / working / approval / error states.
-C. Applications, Files, System, Activity with real data.
+B. Assistant screen: history file, thinking / working / approval / error states. **Done 8 Nov 2026** — see
+   [`PHASE_B_REPORT.md`](PHASE_B_REPORT.md).
+C. Applications, Files, System, Activity with real data. **Implemented 8 Nov 2026** — see
+   [`PHASE_C_REPORT.md`](PHASE_C_REPORT.md). Native screenshot review remains in Phase F.
 D. Mascot states, `speaking` flag, Max/Mira personas, floating companion, tray and hotkey wiring.
 E. Settings (persona, start with Windows, brain status), first-launch screen when no key is set.
 F. Playwright and native screenshots of every screen, top five problems fixed, re-shot; CPU/RAM measured.

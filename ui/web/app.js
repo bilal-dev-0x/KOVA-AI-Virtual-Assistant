@@ -9,11 +9,13 @@ window.kova = (function () {
     state: applyState,
     boot: applyBoot,
     chat: applyChat,
+    history: applyHistory,
     notice: applyNotice,
     trace: applyTrace,
     prompt: applyPrompt,
     stats: applyStats,
     memory: applyMemoryRows,
+    "screen-result": applyScreenResult,
   };
 
   function receive(event) {
@@ -27,6 +29,16 @@ window.kova = (function () {
 
   const names = {};
   const CHAT_KEEP = 200;
+  const seenMessages = new Set();
+  const activeRequests = { apps: 0, files: 0, activity: 0, system: 0 };
+  let fileRoots = [];
+  let fileFolder = "";
+  let systemTimer = null;
+  let systemBusy = false;
+  let screenResultTimer = null;
+  let historyReady = false;
+  let waitingForBridge = false;
+  const chatWaitingForHistory = [];
 
   function applyState(event) {
     const dot = document.getElementById("status-dot");
@@ -114,13 +126,49 @@ window.kova = (function () {
   /* --- chat --- */
 
   function applyChat(event) {
+    // Restore older messages before painting any live message; otherwise a
+    // fast first request can appear above the conversation returned by Python.
+    if (!historyReady) {
+      chatWaitingForHistory.push(event);
+      return;
+    }
+    if (event.id && seenMessages.has(event.id)) {
+      return;
+    }
     const log = document.getElementById("chat-log");
     if (!log) {
       return;
     }
+    if (event.id) {
+      seenMessages.add(event.id);
+    }
     dropEmpty("chat-empty");
     log.appendChild(bubble(event.who, event.text, event.note));
     trim(log);
+  }
+
+  function applyHistory(event) {
+    historyReady = true;
+    (event.messages || []).forEach(function (message) {
+      applyChat({id: message.id, who: message.role, text: message.text});
+    });
+    chatWaitingForHistory.splice(0).forEach(applyChat);
+  }
+
+  function loadHistory() {
+    if (typeof pywebview !== "undefined" && pywebview.api) {
+      pywebview.api.history().then(function (messages) {
+        applyHistory({t: "history", messages: messages});
+      }).catch(function () {
+        // A missing or unreadable local history must not stop the Assistant.
+        applyHistory({t: "history", messages: []});
+      });
+    } else if (!waitingForBridge) {
+      // pywebview adds its api a moment after the page loads: ask again once it is there
+      // (live test 8 Nov: the saved conversation never showed after a restart)
+      waitingForBridge = true;
+      window.addEventListener("pywebviewready", loadHistory, { once: true });
+    }
   }
 
   function dropEmpty(id) {
@@ -138,6 +186,24 @@ window.kova = (function () {
     dropEmpty("chat-empty");
     log.appendChild(bubble("max", event.text, "Heads up"));
     trim(log);
+  }
+
+  function applyScreenResult(event) {
+    const status = document.getElementById("screen-result");
+    if (!status) {
+      return;
+    }
+    status.textContent = event.text || "";
+    status.className = "screen-result" + (event.success ? " is-success" : " is-error");
+    if (screenResultTimer) {
+      clearTimeout(screenResultTimer);
+    }
+    screenResultTimer = setTimeout(function () {
+      status.textContent = "";
+      status.className = "screen-result";
+    }, 5000);
+    const activityPage = document.getElementById("page-activity");
+    if (activityPage && activityPage.classList.contains("is-active")) loadActivity();
   }
 
   function trim(log) {
@@ -168,12 +234,13 @@ window.kova = (function () {
   const TRACE_KEEP = 500;
 
   function applyTrace(event) {
+    const text = (event.line || "").trim();
+    addRecent(text);
     const box = document.getElementById("trace");
     if (!box) {
       return;
     }
     dropEmpty("trace-empty");
-    const text = event.line.trim();
     const line = document.createElement("div");
     line.className = "trace-line" +
       (text.startsWith("→") ? " is-call" : text.startsWith("←") ? " is-back" : "");
@@ -183,7 +250,6 @@ window.kova = (function () {
       box.removeChild(box.firstChild);
     }
     box.scrollTop = box.scrollHeight;
-    addRecent(text);
   }
 
   /* --- Home's "Done this session": the last few tool calls and how they ended --- */
@@ -514,6 +580,345 @@ window.kova = (function () {
     if (name === "settings") {
       loadSettings();
     }
+    if (name === "apps") {
+      loadApps();
+    }
+    if (name === "files") {
+      loadFilesRoots();
+    }
+    if (name === "system") {
+      startSystemPolling();
+    } else {
+      stopSystemPolling();
+    }
+    if (name === "activity") {
+      loadActivity();
+    }
+  }
+
+  /* --- Applications: read from Start menu, launch through the Agent --- */
+
+  function loadApps() {
+    const request = ++activeRequests.apps;
+    const query = document.getElementById("apps-search");
+    const status = document.getElementById("apps-status");
+    if (status) status.textContent = "Loading installed apps…";
+    if (!window.pywebview || !pywebview.api) {
+      if (status) status.textContent = "KOVA's desktop bridge is not ready.";
+      return;
+    }
+    pywebview.api.apps(query ? query.value : "").then(function (answer) {
+      if (request !== activeRequests.apps) return;
+      renderApps(answer || {items: []});
+    }).catch(function () {
+      if (request === activeRequests.apps && status) status.textContent = "Couldn't read the installed apps.";
+    });
+  }
+
+  function renderApps(answer) {
+    const list = document.getElementById("apps-list");
+    const status = document.getElementById("apps-status");
+    const count = document.getElementById("apps-count");
+    if (!list) return;
+    list.textContent = "";
+    const rows = answer.items || [];
+    if (count) count.textContent = rows.length ? rows.length + " apps" : "";
+    if (status) status.textContent = answer.error || (rows.length ? "" : "No matching installed apps.");
+    rows.forEach(function (app) {
+      const row = document.createElement("article");
+      row.className = "data-row";
+      const info = document.createElement("div");
+      info.className = "data-info";
+      const name = document.createElement("strong");
+      name.textContent = app.name;
+      const state = document.createElement("span");
+      state.className = "data-meta";
+      state.textContent = app.running ? "Running" : "Not running";
+      info.append(name, state);
+      const launch = document.createElement("button");
+      launch.type = "button";
+      launch.className = "dialog-btn";
+      launch.textContent = app.running ? "Open" : "Launch";
+      launch.addEventListener("click", function () {
+        pywebview.api.launch_app(app.name).then(showQueuedResult).catch(showActionError);
+      });
+      row.append(info, launch);
+      list.appendChild(row);
+    });
+  }
+
+  /* --- Files: safe roots and bounded browsing/search; actions use Max --- */
+
+  function loadFilesRoots() {
+    if (!window.pywebview || !pywebview.api) {
+      setText("files-status", "KOVA's desktop bridge is not ready.");
+      return;
+    }
+    if (fileRoots.length) {
+      loadFiles(fileFolder || fileRoots[0].path, "");
+      return;
+    }
+    setText("files-status", "Loading allowed folders…");
+    pywebview.api.files().then(function (answer) {
+      fileRoots = answer.roots || [];
+      const select = document.getElementById("files-folder");
+      if (select) {
+        select.textContent = "";
+        fileRoots.forEach(function (root) {
+          const option = document.createElement("option");
+          option.value = root.path;
+          option.textContent = root.name;
+          select.appendChild(option);
+        });
+      }
+      if (!fileRoots.length) {
+        setText("files-status", "No allowed folders are available.");
+        return;
+      }
+      fileFolder = fileRoots[0].path;
+      loadFiles(fileFolder, "");
+    }).catch(function () { setText("files-status", "Couldn't read the allowed folders."); });
+  }
+
+  function loadFiles(folder, query) {
+    if (!window.pywebview || !pywebview.api) return;
+    fileFolder = folder || "";
+    const request = ++activeRequests.files;
+    setText("files-status", query ? "Searching…" : "Loading folder…");
+    pywebview.api.files(fileFolder, query || "").then(function (answer) {
+      if (request !== activeRequests.files) return;
+      fileRoots = answer.roots || fileRoots;
+      renderFiles(answer);
+    }).catch(function () {
+      if (request === activeRequests.files) setText("files-status", "Couldn't read this folder.");
+    });
+  }
+
+  function renderFiles(answer) {
+    const list = document.getElementById("files-list");
+    if (!list) return;
+    list.textContent = "";
+    setText("files-status", answer.error || (answer.truncated ? "Showing the first results; narrow your search for more." :
+      answer.items.length ? "" : "This folder is empty."));
+    const location = document.getElementById("files-location");
+    if (location) location.textContent = answer.folder || "";
+    const up = document.getElementById("files-up");
+    const root = fileRoots.find(function (item) { return item.path.toLowerCase() === fileFolder.toLowerCase(); });
+    if (up) up.disabled = !fileFolder || !!root;
+    (answer.items || []).forEach(function (item) {
+      const row = document.createElement("article");
+      row.className = "data-row file-row";
+      const info = document.createElement("div");
+      info.className = "data-info";
+      const name = document.createElement("strong");
+      name.textContent = item.name;
+      const meta = document.createElement("span");
+      meta.className = "data-meta";
+      meta.textContent = item.is_dir ? "Folder · " + item.modified : formatBytes(item.size) + " · " + item.modified;
+      if (item.is_dir) {
+        name.className = "data-link";
+        name.tabIndex = 0;
+        name.addEventListener("click", function () { loadFiles(item.path, ""); });
+        name.addEventListener("keydown", function (event) {
+          if (event.key === "Enter") loadFiles(item.path, "");
+        });
+      }
+      info.append(name, meta);
+      const actions = document.createElement("div");
+      actions.className = "data-actions";
+      const open = makeButton(item.is_dir ? "Browse" : "Open", function () {
+        pywebview.api.file_action("open", item.path).then(showQueuedResult).catch(showActionError);
+      });
+      actions.appendChild(open);
+      if (!item.is_dir) {
+        actions.appendChild(makeButton("Show", function () {
+          pywebview.api.file_action("show", item.path).then(showQueuedResult).catch(showActionError);
+        }));
+        actions.appendChild(makeButton("Delete", function () {
+          pywebview.api.file_action("delete", item.path).then(showQueuedResult).catch(showActionError);
+        }));
+      }
+      row.append(info, actions);
+      list.appendChild(row);
+    });
+  }
+
+  function formatBytes(bytes) {
+    if (bytes === null || bytes === undefined) return "Size unavailable";
+    if (bytes < 1024) return bytes + " B";
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+    return (bytes / (1024 * 1024 * 1024)).toFixed(1) + " GB";
+  }
+
+  function parentFolder(path) {
+    const normalized = String(path || "").replace(/[\\/]+$/, "");
+    const slash = Math.max(normalized.lastIndexOf("/"), normalized.lastIndexOf("\\"));
+    if (slash < 0) return "";
+    const parent = normalized.slice(0, slash);
+    return /^[A-Za-z]:$/.test(parent) ? parent + "\\" : parent;
+  }
+
+  function makeButton(label, action) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "dialog-btn";
+    button.textContent = label;
+    button.addEventListener("click", action);
+    return button;
+  }
+
+  function showQueuedResult(answer) {
+    if (answer && !answer.queued) applyScreenResult({text: answer.message || "Max couldn't take that request.", success: false});
+  }
+
+  function showActionError() {
+    applyScreenResult({text: "Max couldn't complete that action.", success: false});
+  }
+
+  function setText(id, text) {
+    const element = document.getElementById(id);
+    if (element) element.textContent = text || "";
+  }
+
+  /* --- System: sample only while this page is active and the window is shown --- */
+
+  function startSystemPolling() {
+    if (systemTimer || document.hidden) return;
+    loadSystem();
+    systemTimer = setInterval(loadSystem, 2000);
+  }
+
+  function stopSystemPolling() {
+    if (systemTimer) clearInterval(systemTimer);
+    systemTimer = null;
+  }
+
+  function loadSystem() {
+    if (systemBusy || document.hidden || !window.pywebview || !pywebview.api) return;
+    systemBusy = true;
+    const request = ++activeRequests.system;
+    pywebview.api.system().then(function (snapshot) {
+      if (request === activeRequests.system) renderSystem(snapshot || {});
+    }).catch(function () {
+      setText("system-updated", "Couldn't read system status.");
+    }).finally(function () { systemBusy = false; });
+  }
+
+  function renderSystem(snapshot) {
+    const grid = document.getElementById("system-status");
+    const processes = document.getElementById("system-processes");
+    if (!grid || !processes) return;
+    grid.textContent = "";
+    const ram = snapshot.ram;
+    const battery = snapshot.battery;
+    const disks = snapshot.disks || [];
+    addSystemCard(grid, "CPU", snapshot.cpu_percent === null || snapshot.cpu_percent === undefined
+      ? "Not available" : Math.round(snapshot.cpu_percent) + "%");
+    addSystemCard(grid, "Memory", ram ? Number(ram.used_gb).toFixed(1) + " / " +
+      Number(ram.total_gb).toFixed(1) + " GB · " + Math.round(ram.percent) + "%" : "Not available");
+    addSystemCard(grid, "GPU", snapshot.gpu_percent === null || snapshot.gpu_percent === undefined
+      ? "Not available" : Math.round(snapshot.gpu_percent) + "%");
+    addSystemCard(grid, "Battery", battery ? Math.round(battery.percent) + "% · " +
+      (battery.plugged ? "Charging" : "On battery") : "Not available");
+    disks.forEach(function (disk) {
+      addSystemCard(grid, "Disk " + disk.drive, Number(disk.free_gb).toFixed(1) + " GB free of " +
+        Number(disk.total_gb).toFixed(1) + " GB · " + Math.round(disk.percent) + "% used");
+    });
+    processes.textContent = "";
+    const rows = snapshot.processes || [];
+    if (!rows.length) {
+      const empty = document.createElement("p");
+      empty.className = "empty";
+      empty.textContent = "Process details are not available.";
+      processes.appendChild(empty);
+    }
+    rows.forEach(function (process) {
+      const row = document.createElement("article");
+      row.className = "data-row";
+      const name = document.createElement("strong");
+      name.textContent = process.name;
+      const usage = document.createElement("span");
+      usage.className = "data-meta";
+      usage.textContent = Math.round(process.ram_mb) + " MB";
+      row.append(name, usage);
+      processes.appendChild(row);
+    });
+    setText("system-updated", "Updated " + new Date().toLocaleTimeString());
+  }
+
+  function addSystemCard(grid, title, value) {
+    const card = document.createElement("article");
+    card.className = "panel system-card";
+    const label = document.createElement("span");
+    label.className = "data-meta";
+    label.textContent = title;
+    const reading = document.createElement("strong");
+    reading.textContent = value;
+    card.append(label, reading);
+    grid.appendChild(card);
+  }
+
+  /* --- Activity: read the real, local ActionRunner log --- */
+
+  function loadActivity() {
+    const request = ++activeRequests.activity;
+    setText("activity-status", "Loading recent actions…");
+    if (!window.pywebview || !pywebview.api) {
+      setText("activity-status", "KOVA's desktop bridge is not ready.");
+      return;
+    }
+    pywebview.api.activity(100).then(function (answer) {
+      if (request !== activeRequests.activity) return;
+      renderActivity(answer || {items: []});
+    }).catch(function () {
+      if (request === activeRequests.activity) setText("activity-status", "Couldn't read the activity log.");
+    });
+  }
+
+  function renderActivity(answer) {
+    const list = document.getElementById("activity-list");
+    if (!list) return;
+    list.textContent = "";
+    const rows = answer.items || [];
+    setText("activity-status", answer.error || (rows.length ? "" : "No actions have been logged yet."));
+    rows.forEach(function (item) {
+      const row = document.createElement("article");
+      row.className = "activity-row" + (item.success ? " is-success" : " is-failed");
+      const head = document.createElement("div");
+      head.className = "activity-head";
+      const title = document.createElement("strong");
+      title.textContent = (item.tool || "Undo") + (item.source ? " · " + item.source : "");
+      const time = document.createElement("time");
+      time.textContent = formatActivityTime(item.time);
+      head.append(title, time);
+      const message = document.createElement("p");
+      message.textContent = item.message || "No result details.";
+      const meta = document.createElement("span");
+      meta.className = "data-meta";
+      const approval = item.approval || "approval not recorded";
+      meta.textContent = (item.success ? "Succeeded" : "Failed") + " · " + approval +
+        (item.undo_text ? " · Reversible: " + item.undo_text : "");
+      row.append(head, message, meta);
+      if (item.undo_available) {
+        row.appendChild(makeButton("Undo", function () {
+          pywebview.api.undo().then(showQueuedResult).catch(showActionError);
+        }));
+      }
+      list.appendChild(row);
+    });
+  }
+
+  function formatActivityTime(value) {
+    const date = new Date(value);
+    if (!value || Number.isNaN(date.getTime())) return "Time unavailable";
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const clock = date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    if (date >= today) return "Today " + clock;
+    if (date >= yesterday) return "Yesterday " + clock;
+    return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" }) + " " + clock;
   }
 
   /* --- the ask bar --- */
@@ -586,11 +991,47 @@ window.kova = (function () {
     if (send) {
       send.addEventListener("click", sendTyped);
     }
+    const appsSearch = document.getElementById("apps-search");
+    if (appsSearch) {
+      let searchTimer = null;
+      appsSearch.addEventListener("input", function () {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(loadApps, 180);
+      });
+    }
+    const appsRefresh = document.getElementById("apps-refresh");
+    if (appsRefresh) appsRefresh.addEventListener("click", loadApps);
+    const folderSelect = document.getElementById("files-folder");
+    if (folderSelect) folderSelect.addEventListener("change", function () {
+      fileFolder = folderSelect.value;
+      loadFiles(fileFolder, "");
+    });
+    const filesSearch = document.getElementById("files-search");
+    const searchFiles = function () { loadFiles(fileFolder, filesSearch ? filesSearch.value.trim() : ""); };
+    if (filesSearch) filesSearch.addEventListener("keydown", function (event) {
+      if (event.key === "Enter") searchFiles();
+    });
+    const filesSearchButton = document.getElementById("files-search-button");
+    if (filesSearchButton) filesSearchButton.addEventListener("click", searchFiles);
+    const filesRefresh = document.getElementById("files-refresh");
+    if (filesRefresh) filesRefresh.addEventListener("click", function () { loadFiles(fileFolder, ""); });
+    const filesUp = document.getElementById("files-up");
+    if (filesUp) filesUp.addEventListener("click", function () {
+      if (fileFolder) loadFiles(parentFolder(fileFolder), "");
+    });
+    const activityRefresh = document.getElementById("activity-refresh");
+    if (activityRefresh) activityRefresh.addEventListener("click", loadActivity);
     // Hidden or minimised: the clip stops, so a window nobody sees costs nothing
-    document.addEventListener("visibilitychange", () => companionState(companionNow));
+    document.addEventListener("visibilitychange", function () {
+      companionState(companionNow);
+      const systemPage = document.getElementById("page-system");
+      if (document.hidden) stopSystemPolling();
+      else if (systemPage && systemPage.classList.contains("is-active")) startSystemPolling();
+    });
     tickClock();
     setInterval(tickClock, 1000);
     greeting();
+    loadHistory();
   }
 
   const loaded = document.readyState !== "loading";

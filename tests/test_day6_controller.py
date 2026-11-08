@@ -102,20 +102,25 @@ def test_the_worker_survives_a_broken_request():
 
 def test_confirm_waits_for_the_pop_up_and_only_yes_is_yes():
     asked = []
+    observed_states = []
+    ctl_ref = {}
 
     def prompt(kind, question):
         asked.append((kind, question))
+        observed_states.append(ctl_ref["controller"].state)
         return True
 
     agent = FakeAgent()
     agent.script = lambda text: Result(agent.confirm("Close discord?"), "closing")
     _, bridge, ctl, shown = make(agent=agent, prompt=prompt)
+    ctl_ref["controller"] = ctl
     ctl.attach()
     ctl.submit("close discord")
     pump_until(bridge, lambda: shown["results"])
     assert asked == [("confirm", "Close discord?")]
     assert shown["results"][0][0].message == "closing"
     assert agent.confirm == ctl.confirm  # the one agent asks the UI now
+    assert observed_states == ["approval"]
 
 
 def test_closing_the_pop_up_counts_as_no():
