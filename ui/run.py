@@ -56,8 +56,8 @@ def run_ui(agent, dashboard_factory=None, tray_factory=Tray, hotkey_factory=Hotk
 
     try:
         if dashboard_factory is None:
-            from ui.app import Dashboard
-            dashboard_factory = Dashboard
+            from ui.web_app import WebDashboard
+            dashboard_factory = WebDashboard
 
         dashboard = dashboard_factory(
             controller, agent, speak=speak,
@@ -117,7 +117,7 @@ def _voice_loop(agent, controller, speak):
     def listen(wait_seconds=5, max_seconds=10):
         heard = voice_handler.listen_text(wait_seconds=wait_seconds, max_seconds=max_seconds)
         if heard:
-            log.info("Heard: %s (sure %.2f)", heard, voice_handler.last_confidence)
+            log.info("Heard: %s (sure %s)", heard, voice_handler.sure_text())
         return heard
 
     return VoiceLoop(agent, controller, listen, speak, unsure=voice_handler.unsure,
@@ -131,7 +131,7 @@ def _listen_once():
     heard = voice_handler.listen_text(wait_seconds=5, max_seconds=10)
     if not heard:
         return None
-    log.info("Heard: %s (sure %.2f)", heard, voice_handler.last_confidence)
+    log.info("Heard: %s (sure %s)", heard, voice_handler.sure_text())
     if voice_handler.unsure():
         log.info("Not acted on, speech recognition was unsure: %s", heard)
         return None

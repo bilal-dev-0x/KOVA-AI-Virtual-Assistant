@@ -4,7 +4,7 @@ import threading
 import time
 
 from modules.result import Result
-from ui.app import percent
+from ui.messages import percent
 from ui.bridge import Bridge
 from ui.controller import Controller
 from ui.voice import VoiceLoop

@@ -1,1 +1,3 @@
-pytest
+# Development-only tools (not needed to run KOVA)
+# UI screenshots and browser tests; uses the installed Microsoft Edge (channel="msedge"), no browser download
+playwright

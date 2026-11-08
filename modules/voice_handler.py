@@ -160,6 +160,10 @@ def listen_with_sounddevice(seconds=4, sample_rate=16000):
         return audio_data
 
     except Exception as e:
+        if "-9983" in str(e) or "-9988" in str(e):
+            # 7 Nov log: the stream is closed under a listen when Max stops; nothing went wrong
+            log.info("Microphone closed while listening: %s", e)
+            return None
         print("Microphone recording error:", e)
         log.error("Microphone recording error: %s", e)
         return None
@@ -342,6 +346,10 @@ def record_phrase(wait_seconds=5, max_seconds=10):
             adapt = None if _fixed_threshold is not None else _adapt
             phrase = collect_phrase(chunks, current_threshold, wait_seconds, max_seconds, on_quiet=adapt)
     except Exception as e:
+        if "-9983" in str(e) or "-9988" in str(e):
+            # 7 Nov log: the stream is closed under a listen when Max stops; nothing went wrong
+            log.info("Microphone closed while listening: %s", e)
+            return None
         print("Microphone recording error:", e)
         log.error("Microphone recording error: %s", e)
         return None
@@ -386,7 +394,8 @@ def pick_language(results, current):
     """The (language, text) to use from {language: (text, confidence)}. The language that won last
     time gets STICKY extra, so Max only switches when another one clearly heard you better."""
     global last_confidence
-    scored = [(confidence + (STICKY if language == current else 0), language, text)
+    # No score from Google counts as middling when comparing languages
+    scored = [((0.5 if confidence is None else confidence) + (STICKY if language == current else 0), language, text)
               for language, (text, confidence) in results.items() if text]
     if not scored:
         return None, None
@@ -396,8 +405,15 @@ def pick_language(results, current):
 
 
 def unsure():
-    """True when Google itself wasn't sure of the last thing heard."""
-    return last_confidence < UNSURE
+    """True when Google itself wasn't sure of the last thing heard. No score from Google is not
+    "unsure": nothing is known, so Max acts as before."""
+    return last_confidence is not None and last_confidence < UNSURE
+
+
+def sure_text():
+    """For the log: '0.83', or '?' when Google gave no score (the 7 Nov log showed 0.50 for every
+    phrase, which was this default, not a real score)."""
+    return "?" if last_confidence is None else f"{last_confidence:.2f}"
 
 
 def finish_cut_off(text, listen):
@@ -419,8 +435,9 @@ def _recognize_in(audio, language):
     if not isinstance(result, dict) or not result.get("alternative"):
         return None, 0.0
     best = result["alternative"][0]
-    # Google gives a confidence for its best guess only; without one, count it as middling
-    return best.get("transcript"), float(best.get("confidence", 0.5))
+    # Google gives a confidence for its best guess only, and often none at all: None = unknown
+    confidence = best.get("confidence")
+    return best.get("transcript"), None if confidence is None else float(confidence)
 
 
 def recognize(audio):

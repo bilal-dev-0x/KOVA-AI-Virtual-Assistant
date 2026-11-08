@@ -7,8 +7,8 @@ pygame-ce
 sounddevice
 numpy
 psutil
-customtkinter
 Pillow
+pywebview
 pystray
 pynput
 pyttsx3

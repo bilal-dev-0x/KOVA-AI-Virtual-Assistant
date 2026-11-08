@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>KOVA mockup v1</title>
+<style>
+  /* Mockup only: static, real lines from the 7 Nov live test. No glow, no gradients, no shadows. */
+  :root {
+    --bg: #0e1015;          /* page */
+    --rail: #0b0d11;        /* left rail */
+    --stage: #131722;       /* the Reaper video's own background, so the clip has no edge */
+    --line: #1f232c;        /* 1px borders */
+    --text: #e6e4df;        /* warm off-white, not pure white */
+    --muted: #8a8d95;
+    --faint: #5b5f69;
+    --accent: #7fd3df;      /* the Reaper's eye colour, used in three places only */
+    --warn: #e0a458;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font: 14px/1.5 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    width: 1280px; height: 800px; overflow: hidden;
+    display: grid; grid-template-columns: 200px 1fr 300px; grid-template-rows: 1fr 64px;
+  }
+
+  /* left rail */
+  .rail { grid-column: 1; grid-row: 1 / 3; background: var(--rail); border-right: 1px solid var(--line);
+          padding: 24px 16px; display: flex; flex-direction: column; gap: 24px; }
+  .mark { font-size: 13px; letter-spacing: .32em; font-weight: 600; color: var(--muted); padding-left: 8px; }
+  .nav { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+  .nav li { padding: 8px; border-left: 2px solid transparent; color: var(--muted); }
+  .nav li.on { border-left-color: var(--accent); color: var(--text); background: #12151b; }
+  .rail .foot { margin-top: auto; display: flex; flex-direction: column; gap: 16px; font-size: 12px; color: var(--muted); }
+  .persona { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); }
+  .persona span { text-align: center; padding: 6px 0; }
+  .persona .on { background: #1a1e27; color: var(--text); }
+  .brain b { color: var(--text); font-weight: 500; }
+
+  /* centre */
+  main { grid-column: 2; grid-row: 1; padding: 24px 32px 0; display: flex; flex-direction: column; gap: 24px; min-height: 0; }
+  .top { display: grid; grid-template-columns: 240px 1fr; gap: 32px; align-items: end; }
+  .stage { width: 240px; height: 240px; background: var(--stage); border: 1px solid var(--line); overflow: hidden; }
+  .stage video, .stage img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .hello h1 { font-size: 24px; font-weight: 500; letter-spacing: -.01em; }
+  .state { margin-top: 8px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .facts { margin-top: 16px; display: flex; gap: 24px; font-size: 13px; color: var(--muted); }
+  .facts b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+  .log { flex: 1; min-height: 0; border-top: 1px solid var(--line); padding-top: 16px; overflow: hidden;
+         display: flex; flex-direction: column; gap: 12px; }
+  .row { display: grid; grid-template-columns: 48px 40px 1fr; gap: 8px; }
+  .row time { color: var(--faint); font-size: 12px; font-variant-numeric: tabular-nums; padding-top: 1px; }
+  .row .who { color: var(--faint); font-size: 12px; padding-top: 1px; }
+  .row.max .text { color: var(--text); }
+  .row.you .text { color: var(--muted); }
+  .row .fail { color: var(--warn); }
+
+  /* right column */
+  aside { grid-column: 3; grid-row: 1 / 3; border-left: 1px solid var(--line); padding: 24px 20px; display: flex; flex-direction: column; gap: 24px; }
+  aside h2 { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .08em; text-transform: uppercase; margin-bottom: 12px; }
+  .act { list-style: none; font: 12px/1.6 "Cascadia Mono", Consolas, monospace; color: var(--muted); }
+  .act li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .act .ok { color: var(--text); }
+  .meter { display: grid; grid-template-columns: 56px 1fr 40px; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+  .bar { height: 4px; background: var(--line); }
+  .bar i { display: block; height: 100%; background: #9aa0aa; }
+  .meter b { text-align: right; color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+
+  /* input */
+  .ask { grid-column: 2; grid-row: 2; border-top: 1px solid var(--line); display: flex; align-items: center; gap: 16px; padding: 0 32px; }
+  .ask .field { flex: 1; color: var(--faint); }
+  .ask .key { font-size: 12px; color: var(--faint); border: 1px solid var(--line); padding: 2px 8px; }
+  .ask .voice { font-size: 12px; color: var(--accent); }
+</style>
+</head>
+<body>
+  <nav class="rail">
+    <div class="mark">KOVA</div>
+    <ul class="nav">
+      <li class="on">Home</li><li>Activity</li><li>Memory</li><li>Settings</li>
+    </ul>
+    <div class="foot">
+      <div class="persona"><span class="on">Max</span><span>Mira</span></div>
+      <div class="brain">Brain: <b>KOVA server</b><br>Gemini: today’s limit used</div>
+    </div>
+  </nav>
+
+  <main>
+    <section class="top">
+      <div class="stage"><video src="reaper_idle.mp4" poster="reaper_poster.jpg" autoplay loop muted playsinline></video></div>
+      <div class="hello">
+        <h1>Good evening, Commander.</h1>
+        <div class="state"><span class="dot"></span>Asleep. Say “Max” or type below.</div>
+        <div class="facts"><span>CPU <b>9%</b></span><span>RAM <b>57%</b></span><span>Disk <b>72%</b></span><span>Battery <b>100%</b></span></div>
+      </div>
+    </section>
+
+    <section class="log">
+      <div class="row you"><time>20:21</time><span class="who">You</span><span class="text">open max live check</span></div>
+      <div class="row max"><time></time><span class="who">Max</span><span class="text">Opening max_live_check.txt.</span></div>
+      <div class="row you"><time>20:21</time><span class="who">You</span><span class="text">type second line into the notepad window</span></div>
+      <div class="row max"><time></time><span class="who">Max</span><span class="text">Typed it into Text Editor in Notepad.</span></div>
+      <div class="row you"><time>20:21</time><span class="who">You</span><span class="text">save it</span></div>
+      <div class="row max"><time></time><span class="who">Max</span><span class="text">Pressed Ctrl+S in Notepad.</span></div>
+      <div class="row you"><time>20:21</time><span class="who">You</span><span class="text">delete max live check</span></div>
+      <div class="row max"><time></time><span class="who">Max</span><span class="text">Moved max_live_check.txt to the Recycle Bin. You can restore it from there.</span></div>
+      <div class="row you"><time>20:29</time><span class="who">You</span><span class="text">tell me a short joke</span></div>
+      <div class="row max"><time></time><span class="who">Max</span><span class="text">Why did the computer go to the doctor? It had a virus.</span></div>
+    </section>
+  </main>
+
+  <aside>
+    <div>
+      <h2>Activity</h2>
+      <ul class="act">
+        <li class="ok">open_file  max_live_check.txt</li>
+        <li class="ok">ui_type  notepad  11 chars</li>
+        <li class="ok">ui_press_keys  ctrl+s</li>
+        <li class="ok">close_app  notepad  25 MB freed</li>
+        <li class="ok">delete_items  1 file → Recycle Bin</li>
+      </ul>
+    </div>
+    <div>
+      <h2>System</h2>
+      <div class="meter"><span>CPU</span><span class="bar"><i style="width:9%"></i></span><b>9%</b></div>
+      <div class="meter"><span>RAM</span><span class="bar"><i style="width:57%"></i></span><b>57%</b></div>
+      <div class="meter"><span>Disk</span><span class="bar"><i style="width:72%"></i></span><b>72%</b></div>
+      <div class="meter"><span>GPU</span><span class="bar"><i style="width:4%"></i></span><b>4%</b></div>
+    </div>
+    <div>
+      <h2>Reminders</h2>
+      <p style="color:var(--faint);font-size:13px">None set.</p>
+    </div>
+  </aside>
+
+  <div class="ask">
+    <span class="field">Type to Max…</span>
+    <span class="key">Ctrl+Alt+M</span>
+    <span class="voice">Voice on</span>
+  </div>
+</body>
+</html>

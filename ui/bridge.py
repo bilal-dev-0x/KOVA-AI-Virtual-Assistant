@@ -3,9 +3,9 @@ import threading
 
 from modules.logger import get_logger
 
-# Tkinter may only be touched by the thread that created the window, while Max's
-# agent work happens on its own worker thread. Everything crossing between them
-# travels through this one queue: the worker posts, a timer on the Tk side drains.
+# Everything crossing between Max's agent threads and the dashboard travels
+# through this one queue. The Tk window drains it with a timer; the PyWebView
+# window's pump thread waits on next_call().
 #
 # close() stops the bridge for good, so a window being destroyed can never leave
 # a worker blocked on a dialog nobody will answer.
@@ -47,6 +47,23 @@ class Bridge:
 
     def pending(self):
         return self._queue.qsize()
+
+    def next_call(self, timeout=None):
+        """Wait for one posted call and run it, for the web UI's pump thread.
+        True when something ran. close() wins the race: what was taken before it
+        is dropped, like drain() drops what close() finds, so a callback from a
+        dead window never runs."""
+        try:
+            fn, args = self._queue.get(timeout=timeout)
+        except queue.Empty:
+            return False
+        if self.closed:
+            return True
+        try:
+            fn(*args)
+        except Exception:
+            log.exception("UI callback failed")
+        return True
 
     def close(self):
         """Refuse new work and throw away what is waiting: the window is going away.

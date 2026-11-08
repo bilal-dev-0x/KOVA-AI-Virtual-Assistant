@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KOVA</title>
+<link rel="icon" href="assets/reaper_icon.png">
+<link rel="stylesheet" href="style.css">
+<script defer src="app.js"></script>
+</head>
+<body>
+
+<!-- Lucide icons (ISC licence), stored here so nothing loads from the network -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></symbol>
+    <symbol id="i-message" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+    <symbol id="i-gauge" viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></symbol>
+    <symbol id="i-database" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+  </defs>
+</svg>
+
+<div class="app">
+
+  <nav class="rail" id="sidebar" aria-label="KOVA">
+    <div class="brand">
+      <img class="brand-mark" src="assets/reaper_icon.png" alt="" width="28" height="28">
+      <span class="brand-name">KOVA</span>
+    </div>
+
+    <div class="nav" id="nav">
+      <button class="nav-item is-active" data-page="home" type="button"><svg class="icon"><use href="#i-home"/></svg><span>Home</span></button>
+      <button class="nav-item" data-page="assistant" type="button"><svg class="icon"><use href="#i-message"/></svg><span>Assistant</span></button>
+      <button class="nav-item" data-page="apps" type="button"><svg class="icon"><use href="#i-grid"/></svg><span>Applications</span></button>
+      <button class="nav-item" data-page="files" type="button"><svg class="icon"><use href="#i-folder"/></svg><span>Files</span></button>
+      <button class="nav-item" data-page="system" type="button"><svg class="icon"><use href="#i-gauge"/></svg><span>System</span></button>
+      <button class="nav-item" data-page="activity" type="button"><svg class="icon"><use href="#i-activity"/></svg><span>Activity</span></button>
+      <button class="nav-item" data-page="memory" type="button"><svg class="icon"><use href="#i-database"/></svg><span>Memory</span></button>
+      <button class="nav-item" data-page="settings" type="button"><svg class="icon"><use href="#i-settings"/></svg><span>Settings</span></button>
+    </div>
+
+    <div class="rail-foot">
+      <div class="status" id="status"><span class="status-dot" id="status-dot"></span><span class="status-text" id="status-text">Starting</span></div>
+      <div class="brain" id="brain"></div>
+      <div class="clock" id="clock"></div>
+    </div>
+  </nav>
+
+  <main class="pages">
+
+    <!-- Home: who is here and what is happening now -->
+    <section class="page is-active" id="page-home" aria-labelledby="greeting">
+      <div class="home-hero">
+        <figure class="companion" id="companion" data-state="idle">
+          <video id="companion-video" src="assets/reaper_idle.mp4" poster="assets/reaper_poster.jpg"
+                 muted loop playsinline preload="metadata"></video>
+        </figure>
+        <div class="home-words">
+          <h1 class="greeting" id="greeting">Hello</h1>
+          <p class="home-date" id="home-date"></p>
+          <p class="home-state" id="home-state">Starting</p>
+        </div>
+      </div>
+
+      <div class="quick" id="quick"></div>
+
+      <div class="home-grid">
+        <section class="panel" aria-labelledby="home-sys-title">
+          <h2 class="panel-title" id="home-sys-title">This PC</h2>
+          <div class="meter"><span class="meter-name">CPU</span><span class="meter-bar"><i id="meter-cpu"></i></span><span class="meter-value" id="meter-cpu-value">–</span></div>
+          <div class="meter"><span class="meter-name">Memory</span><span class="meter-bar"><i id="meter-ram"></i></span><span class="meter-value" id="meter-ram-value">–</span></div>
+          <div class="meter"><span class="meter-name">Disk C:</span><span class="meter-bar"><i id="meter-disk"></i></span><span class="meter-value" id="meter-disk-value">–</span></div>
+        </section>
+        <section class="panel" aria-labelledby="home-recent-title">
+          <h2 class="panel-title" id="home-recent-title">Done this session</h2>
+          <ol class="recent" id="recent"><li class="empty">Nothing yet. Ask Max to open an app or find a file.</li></ol>
+        </section>
+      </div>
+    </section>
+
+    <!-- Assistant: the conversation -->
+    <section class="page" id="page-assistant" aria-labelledby="assistant-title">
+      <header class="page-head"><h1 class="page-title" id="assistant-title">Assistant</h1><span class="page-note" id="assistant-note"></span></header>
+      <div class="chat" id="chat-log" aria-live="polite"><p class="empty" id="chat-empty">Type below, or say the wake word. Answers to spoken requests are also spoken.</p></div>
+      <div class="askbar">
+        <input id="ask-input" class="ask-input" type="text" autocomplete="off" spellcheck="false" placeholder="Message Max">
+        <button id="ask-mic" class="icon-btn" type="button" title="Listen once (Ctrl+Alt+M)" aria-label="Listen once"><svg class="icon"><use href="#i-mic"/></svg></button>
+        <button id="ask-send" class="icon-btn is-primary" type="button" title="Send" aria-label="Send"><svg class="icon"><use href="#i-send"/></svg></button>
+      </div>
+    </section>
+
+    <!-- Screens that have no backend yet say so plainly (prompt.txt: no fake controls) -->
+    <section class="page" id="page-apps" aria-labelledby="apps-title">
+      <header class="page-head"><h1 class="page-title" id="apps-title">Applications</h1></header>
+      <div class="planned"><p>Not built yet.</p><p class="page-note">This screen will list the apps installed on this PC, search them and start them. Until then, ask Max: "open chrome".</p></div>
+    </section>
+    <section class="page" id="page-files" aria-labelledby="files-title">
+      <header class="page-head"><h1 class="page-title" id="files-title">Files</h1></header>
+      <div class="planned"><p>Not built yet.</p><p class="page-note">This screen will browse and search your folders and open files. Until then, ask Max: "find my cv".</p></div>
+    </section>
+    <section class="page" id="page-system" aria-labelledby="system-title">
+      <header class="page-head"><h1 class="page-title" id="system-title">System</h1></header>
+      <div class="planned"><p>Not built yet.</p><p class="page-note">This screen will show CPU, memory, disk, battery, GPU and the busiest programs. Home already shows the first three live.</p></div>
+    </section>
+
+    <!-- Activity: every tool Max runs, live -->
+    <section class="page" id="page-activity" aria-labelledby="activity-title">
+      <header class="page-head"><h1 class="page-title" id="activity-title">Activity</h1><span class="page-note">Every tool Max runs in this session, as it runs.</span></header>
+      <div class="trace" id="trace" aria-live="polite"><p class="empty" id="trace-empty">No tools have run yet.</p></div>
+    </section>
+
+    <section class="page" id="page-memory" aria-labelledby="memory-title">
+      <header class="page-head">
+        <h1 class="page-title" id="memory-title">Memory</h1>
+        <button id="memory-refresh" class="icon-btn" type="button" title="Refresh" aria-label="Refresh"><svg class="icon"><use href="#i-refresh"/></svg></button>
+      </header>
+      <p class="page-note memory-explain">Facts you told Max to remember, kept on this PC only. Forgetting one asks first.</p>
+      <div class="memory-list" id="memory-list"></div>
+    </section>
+
+    <section class="page" id="page-settings" aria-labelledby="settings-title">
+      <header class="page-head"><h1 class="page-title" id="settings-title">Settings</h1></header>
+      <div class="settings-form" id="settings-form"></div>
+      <p class="settings-status" id="settings-status" role="status"></p>
+    </section>
+
+  </main>
+</div>
+
+<!-- the approval sheet: one at a time, one token at a time -->
+<div class="overlay" id="overlay" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-question">
+    <div class="dialog-head">
+      <span class="dialog-kind" id="dialog-kind">Approval</span>
+      <button class="icon-btn" id="dialog-x" type="button" title="Close" aria-label="Close"><svg class="icon"><use href="#i-x"/></svg></button>
+    </div>
+    <p class="dialog-question" id="dialog-question"></p>
+    <input id="dialog-input" class="ask-input dialog-input" type="text" autocomplete="off" hidden>
+    <div class="dialog-actions" id="dialog-actions"></div>
+  </div>
+</div>
+</body>
+</html>

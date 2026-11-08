@@ -172,8 +172,12 @@ def _one(controls, name, app, editable):
             names = ", ".join(c.name or "no name" for c in found[:5])
             return Result(False, f"{app} has {len(found)} text fields: {names}. Say which one.", halt=True)
     if not found:
-        return Result(False, f"I can't find a {'field' if editable else 'control'} called {name} in {app}.",
-                      halt=True)
+        what = "field" if editable else "control"
+        if not spoken_name(name):
+            # 7 Nov log: "called  in ytdesktop"; apps drawn without real controls (Electron) show none
+            return Result(False, f"I can't find a text {what} I can type in, in {app}. Click the search box "
+                                 "first, then tell me what to type.", halt=True)
+        return Result(False, f"I can't find a {what} called {name} in {app}.", halt=True)
     if len(found) > 1:
         names = "; ".join(f"{c.kind} {c.name}" for c in found[:5])
         return Result(False, f"There are {len(found)} called {name} in {app}: {names}. Say which one.", halt=True)

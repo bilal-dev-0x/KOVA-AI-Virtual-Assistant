@@ -1,5 +1,6 @@
 import os
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Callable
@@ -75,6 +76,7 @@ LONG_COMMAND = re.compile(r"^(create|make (a|an|me)|rename|delete|remove|find|lo
 # Commands found by one word anywhere ("gpu", "ram"): in a longer sentence that isn't a plain
 # status question (often Roman Urdu), that word is part of a question for the brain
 KEYWORD_COMMANDS = {"cpu", "ram", "gpu", "disk", "battery", "cpu and ram"}
+JOINED_COMMANDS = {"open and confirm"}  # one command though its phrase says "and"
 # Also found by a few words anywhere: in a long sentence those words may be incidental
 LOOSE_COMMANDS = {"volume up", "volume down", "date", "time", "voice", "uptime", "startup apps", "top cpu",
                   "top processes", "health report", "power plan", "task manager tab", "start menu", "exit",
@@ -150,7 +152,12 @@ MISHEARD.update({"are alert song": "are alerts on", "are alerts song": "are aler
                  "alerts song": "are alerts on", "do them": "undo", "undo them": "undo"})
 MISHEARD_START = [(re.compile(r"^forgot\b"), "forget")]
 # Inside a sentence: "switch to ip performance", "what proteins do i have"
+REPEAT = re.compile(r"^(please )?(say (that |it )?again|repeat( that| it)?( please)?|come again|what did you say"
+                    r"|dobara (bolo|kaho)|phir se (bolo|kaho))$")
+
 MISHEARD_WORDS = [(re.compile(r"\b(ip|hi|hai) performance\b"), "high performance"),
+                  # 7 Nov log: "close youself" was typed, and Max said it can't close itself
+                  (re.compile(r"\b(youself|yourslef|urself|yourelf)\b"), "yourself"),
                   (re.compile(r"\b(proteins|routings)\b"), "routines"),
                   # "what about my rank", "now whats my rain usage", "meri raim" (voice test 6 Nov)
                   (re.compile(r"\b(my|meri|mera) (rank|rain|raim|rams)\b"), r"\1 ram"),
@@ -430,6 +437,7 @@ class Agent:
         self.recent_local = []  # local commands since the last agent request, for context
         self.raw_text = ""      # what was said, before normalize(): memory keeps its capitals and paths
         self.last_fact = None   # the memory "forget that" means
+        self.last_answer = None  # what "say again" repeats
         self.closing_title = None  # (app, window title) when "close lofi music" named a window, not an app
         self.closing_window = None  # (said, app, title) for a window of an app apps.json doesn't know
         self.last_played = None    # what "close the song" means
@@ -554,12 +562,30 @@ class Agent:
                     self.open_in_code, help="open <file or folder> in vs code"),
             # "open the whatsapp tab in the existing chrome window", "switch to the gmail tab"
             # Dashboard test: "close all youtube tabs" went to the AI, which could close only one
+            # 7 Nov log: "open notepad and tell me when it's on the screen": the server model said
+            # "I see Notepad" without looking. Max now waits for the real window and says so
+            Command("open and confirm", r"^(next command )?(just |now )?(try )?open(ing)? (?P<arg>.+?)( again)?( and| then)+"
+                                        r" tell me when (it'?s|it is|you see it|it appears|its)"
+                                        r"( fully)?( on (the|your|my) screen| visible| open| there)?$",
+                    self.open_and_confirm, help="open notepad and tell me when it's on the screen"),
+            # Live test 7 Nov: "save it" (two words) got "Sorry, I didn't catch that"
+            Command("save", r"^(save|save it|save this|save that|save the file|save my work)( now| please)?$",
+                    lambda arg: tool("ui_press_keys", keys="ctrl+s"), help="save it (Ctrl+S in the window in front)"),
+            # Live test 7 Nov: "close file explorer" was refused (explorer.exe is the taskbar too)
+            Command("close explorer", r"^close( the| my)? (file explorer|explorer|folder|this pc)( window)?$",
+                    self.close_explorer, help="close file explorer"),
+            # 7 Nov log: "close the chrome tab" closed all of Chrome. A tab is only ever Ctrl+W
+            Command("close tab", r"^close( the| this| current| my| that)?( (?P<arg>chrome|edge|brave|browser))?"
+                                 r"( current| open)? tab$",
+                    self.close_current_tab, help="close the chrome tab"),
             Command("close tabs", r"^close( all)?( the| my)?( open)? (?P<arg>.+?) tabs$",
                     lambda arg: tool("close_tabs", name=arg), help="close all youtube tabs"),
             Command("switch tab", r"^(switch|go|change|move) to( the| my)? (?P<arg>.+?) tab( in( the)?( existing| open)?"
                                   r"( chrome| edge| brave| browser)( window)?)?$"
                                   r"|^(open|show)( the| my)? (?P<arg2>.+?) tab in( the)?( existing| open)?"
-                                  r"( chrome| edge| brave| browser)( window)?$",
+                                  r"( chrome| edge| brave| browser)( window)?$"
+                                  # 7 Nov log: "open adobe firefly tab" looked for an app
+                                  r"|^(open|show)( the| my)? (?!.*new tab$)(?P<arg3>.+?) tab$",
                     lambda arg: tool("switch_tab", name=arg), help="switch to the <name> tab"),
             # After "find my cv": "open the second one"
             Command("open found", r"^open( up)?( the| number)? (?P<arg>first|second|third|fourth|fifth|last|1st|2nd|3rd"
@@ -593,7 +619,7 @@ class Agent:
                                       r"( on my (pc|computer|laptop))?$",
                     lambda arg: tool("open_folder", path=files.place(arg)), help="open my downloads"),
             Command("open folder", r"^(open|show)( me)?( my| the)? (?P<arg>.+? (folder|directory))( now| for me| again)?$"
-                                   r"|^open (?P<arg2>[a-z] drive\b.*)$|^open( the| my)? folder (?P<arg3>.+)$",
+                                   r"|^open( the| my)? (?P<arg2>[a-z] drive\b.*)$|^open( the| my)? folder (?P<arg3>.+)$",
                     self.open_folder, help="open my project folder / open D drive coding arc"),
             # ---------- Day 5: games ----------
             Command("list games", r"^(which|what) games (are installed|do i have|are on my (pc|computer|laptop)|can i play)"
@@ -613,7 +639,7 @@ class Agent:
             Command("open in tab", r"^open (?P<arg>.+?) in (a )?new (browser )?tab$",
                     lambda arg: tool("open_app", name=arg)),
             Command("open", r"^(open|launch|start)( (?P<arg>.+))?$",
-                    lambda arg: tool("open_app", name=arg), help="open <app or website>", ask_text="Open what?"),
+                    self.open_any, help="open <app or website>", ask_text="Open what?"),
             # "force close calculator", "close it anyway", "force it" after a close failed
             Command("force close", r"^force (close|quit|kill|stop|end)( (?P<arg>.+))?$|^force (?P<arg2>it)$"
                                    r"|^(close|quit|kill|end|stop) (?P<arg3>.+?) (forcefully|by force|anyway|forcibly)$",
@@ -682,7 +708,7 @@ class Agent:
             Command("press keys", r"^(press|hit)( the)? (?P<arg>enter|return|escape|esc|tab|backspace|back space|(ctrl|control) [a-z])( key)?$",
                     lambda arg: tool("ui_press_keys", keys=arg), help="press enter / press ctrl s"),
             Command("click", r"^(click|tap|hit|press)( on)?( the)? (?P<arg>.+?)( button| link| tab| menu| option| checkbox)?$",
-                    lambda arg: tool("ui_click", name=self._said(arg)), help="click <button name>"),
+                    self.click_in, help="click <button name>"),
             Command("type", r"^type( in)? (?P<arg>.+)$", self.type_into, help="type <text> into <field>"),
             # ---------- Day 4: files ----------
             Command("undo organise", r"^(undo|reverse)( the)? (organi[sz]ing|organi[sz]e|sorting|tidying)( of)?( my| the)? "
@@ -807,6 +833,18 @@ class Agent:
         return None, None
 
     def handle(self, raw_text):
+        # 7 Nov log: "say again" four times got no answer at all
+        if REPEAT.match(fix_misheard(self.normalize(raw_text or ""))):
+            log.info("Input: %s (repeat)", raw_text)
+            if self.last_answer is None:
+                return Result(True, "I haven't said anything yet.")
+            return self.last_answer
+        result = self._handle(raw_text)
+        if result is not None and result.message:
+            self.last_answer = Result(result.success, result.message)
+        return result
+
+    def _handle(self, raw_text):
         self.raw_text = raw_text
         text = fix_misheard(self.normalize(raw_text))
         # "no minimise the cloud window": a correction in front of a command (only when the rest is one)
@@ -829,6 +867,10 @@ class Agent:
         # Hybrid routing: simple commands stay local (instant, free, offline),
         # requests with several parts go to the agent
         stays_local = MEMORY_COMMAND.match(text) and not THEN_ACTION.search(text)
+        # Commands whose own phrase has "and" in it (live test: "open notepad and tell me when it's on
+        # the screen" went to the server for 130 s)
+        first = self.match(text)[0]
+        stays_local = stays_local or (first is not None and first.name in JOINED_COMMANDS)
         if not stays_local and not JOINERS.search(text):
             # Long but one clear command ("tell me which apps are open right now in front of me"): local,
             # unless only a keyword was found in it ("yah meri gpu per ..." stays a question)
@@ -954,6 +996,7 @@ class Agent:
 
     def _fallback(self, raw_text, text):
         if len(text.split()) < self.min_ai_words and not QUESTION.match(self.normalize_wake(raw_text)):
+            log.info("Not understood (too short for the AI): %s", text)
             return Result(False, "Sorry, I didn't catch that.")
         if not self.provider:
             return Result(False, "I don't have a command for that, and Gemini isn't set up. "
@@ -1044,6 +1087,57 @@ class Agent:
                 self.closing_window = (said, app, title)
                 return said, None
         return key, problem
+
+    def open_any(self, name):
+        """An app or website first; when there is none by that name, a file or folder called that
+        (live test: "open max live check" went to the AI for a file Max had just made)."""
+        opened = self._tool("open_app", name=name)
+        if opened.success or not name or not re.search(r"don't know an app|can't find", opened.message.lower()):
+            return opened
+        if files.find(name, seconds=2).success and len(files._found) == 1:
+            return self._tool("open_file", target=files._found[0])
+        return opened
+
+    def close_explorer(self, arg=None):
+        """'close file explorer': its folder window, never explorer.exe itself (that is the taskbar).
+        A folder window opens again in a second, so no question first."""
+        hwnd, app, title = windows.find("file explorer")
+        if hwnd is None:
+            return Result(False, "I can't see a File Explorer window.")
+        return windows.close_hwnd(hwnd, "file explorer", title)
+
+    def click_in(self, said):
+        """'mobile devices option in setting window' -> click 'mobile devices' in the Settings window
+        (7 Nov log: the whole phrase was taken as the button's name)."""
+        m = re.match(r"^(?P<name>.+?)( option| button| link| item| tab)? (in|on) (the |my )?(?P<window>.+?) window$",
+                     said or "")
+        if m:
+            return self._tool("ui_click", name=self._said(m["name"]), window=m["window"])
+        return self._tool("ui_click", name=self._said(said))
+
+    def open_and_confirm(self, name, wait_seconds=8):
+        """Open name, then wait for its window to really show before saying it's there."""
+        opened = self._tool("open_app", name=name)
+        if not opened.success:
+            return opened
+        deadline = time.time() + wait_seconds
+        while time.time() < deadline:
+            hwnd, app, title = windows.find(name)
+            if hwnd is not None:
+                front = windows.target_window()
+                where = "in front" if front and front[0] == hwnd else "open, behind another window"
+                return Result(True, f"{app.capitalize()} is {where} now: {system_control.spoken_title(title)}.")
+            time.sleep(0.5)
+        return Result(False, f"I started {name}, but its window hasn't shown up after {wait_seconds} seconds.")
+
+    def close_current_tab(self, browser):
+        """The tab showing in the front browser window (or in that browser's front window)."""
+        wanted = None if browser in (None, "", "browser") else browser
+        for hwnd, title in system_control.app_windows(sorted(BROWSER_KEYS)):
+            key = BROWSER_KEYS.get(windows.process_of(hwnd))
+            if key and wanted in (None, key):
+                return self._tool("close_tab", name=key, title=title)
+        return Result(False, f"I can't see a {wanted or 'browser'} window.")
 
     def close_front_window(self):
         """'close the window': the one you're looking at (not Max's terminal)."""
@@ -1169,7 +1263,11 @@ class Agent:
         m = TYPE_INTO.match(said)
         args = {"text": self._said(m["text"])}
         field = m["f1"] or m["f2"]
-        if field:
+        window = re.match(r"^(?P<w>.+?) window$", field or "")
+        if window:
+            # Live test: "into the notepad window" is the window, not a field called that
+            args["window"] = window["w"]
+        elif field:
             args["field"] = self._said(field)
         return self._tool("ui_type", **args)
 

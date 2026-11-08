@@ -57,6 +57,10 @@ def app_name(process):
     return lower.removesuffix(".exe")
 
 
+OWN_NAMES = {"your", "yours", "yourself", "you", "kova", "max", "mira", "dashboard", "kova dashboard",
+             "your own", "the kova"}
+
+
 def find(name, title=""):
     """The window name means: (hwnd, app, title), or (None, None, Result) explaining why not.
 
@@ -64,14 +68,30 @@ def find(name, title=""):
     in a window's title ("minimise lofi music"). With several windows the front one is used,
     unless title picks another.
     """
+    said = re.sub(r"\s+window$", "", (name or "").lower().strip())
+    if said in OWN_NAMES:
+        # 7 Nov log: "minimise your window" failed; it means Max's own dashboard
+        found = [(hwnd, text) for hwnd, _, text in visible_windows() if _ours(hwnd)]
+        if not found:
+            return None, None, Result(False, "My window isn't open. Start me with --ui to get it.")
+        return found[0][0], "KOVA", found[0][1]
     key, entry = system_control._resolve_app(name)
-    if key and entry.get("process"):
+    if key == "file explorer":
+        # 7 Nov log: Explorer windows are titled by their folder, so "file explorer" never matched
+        app = key
+        found = [(hwnd, text) for hwnd, process, text in visible_windows() if process.lower() == "explorer.exe"]
+    elif key and entry.get("process"):
         app = key
         found = system_control.app_windows(entry["process"])
     else:
         words = system_control.title_words(name)
         matches = [(hwnd, process, text) for hwnd, process, text in visible_windows()
                    if system_control.title_has(f"{process.removesuffix('.exe')} {text}", words)]
+        if not matches and len(words) > 1:
+            # "open code" is OpenCode: names written as one word are said as two
+            joined = "".join(words)
+            matches = [(hwnd, process, text) for hwnd, process, text in visible_windows()
+                       if joined in re.sub(r"\W", "", f"{process} {text}".lower())]
         found = [(hwnd, text) for hwnd, _, text in matches]
         # Found by its program ("wps photos" -> wpsphotos.exe): named after it. Found by its title
         # ("lofi music"): named as it was said, without a trailing "window"

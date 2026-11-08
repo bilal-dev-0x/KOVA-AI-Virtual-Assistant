@@ -43,7 +43,7 @@ CLAIM = re.compile(
     rf"(?P<said>{_WORDS})\b|(?:^|[.!?]\s+)(?P<lead>{_WORDS})\b", re.IGNORECASE)
 # "I see the Valorant window", "The YouTube window is open and showing a search for film": a
 # description of the screen needs a tool that read it in this request
-SEE_CLAIM = re.compile(r"\bI (?:can )?(?:see|notice) (?:a|an|the|that|your|it|some|two|three|four|five)\b|\b(?:is|are) (?:now )?(?:open and )?(?:showing|displaying)\b"
+SEE_CLAIM = re.compile(r"\bI (?:can )?(?:see|notice) (?:a|an|the|that|your|it|some|two|three|four|five|you have|you've)\b|\b(?:is|are) (?:now )?(?:open and )?(?:showing|displaying)\b"
                        r"|\bon (?:your|the) screen\b", re.IGNORECASE)
 SEE_TOOLS = {"look_at_screen", "ui_read", "open_windows", "list_running_apps"}
 # "I've set a reminder" / "I'll set a timer for 6:30": only the reminder tool backs that

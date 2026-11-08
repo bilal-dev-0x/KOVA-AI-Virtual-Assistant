@@ -154,7 +154,7 @@ def run_voice(agent):
         heard = voice_handler.listen_text(wait_seconds=wait_seconds, max_seconds=max_seconds)
         if heard:
             print("You said:", heard)
-            log.info("Heard: %s (sure %.2f)", heard, voice_handler.last_confidence)
+            log.info("Heard: %s (sure %s)", heard, voice_handler.sure_text())
         return heard
 
     def ask(question):
@@ -274,8 +274,8 @@ def main():
                 alerts.start(agent.config)
             try:
                 if args.ui:
-                    from ui.run import run_ui
-                    result = run_ui(agent, is_yes=is_yes)
+                    from ui.web_app import launch
+                    result = launch(agent, is_yes=is_yes)
                 else:
                     result = run_text(agent) if args.text else run_voice(agent)
             finally:

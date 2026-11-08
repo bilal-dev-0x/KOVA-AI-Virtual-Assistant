@@ -159,15 +159,7 @@ def test_main_dispatches_ui_mode_without_creating_another_agent(monkeypatch):
     monkeypatch.setattr(main.windows if hasattr(main, "windows") else __import__("modules.windows", fromlist=["windows"]),
                         "dpi_aware", lambda: None, raising=False)
 
-    import ui.run
-    monkeypatch.setattr(ui.run, "run_ui", lambda shared, **kw: calls.append(shared) or Result(True, "done", stop=True))
+    import ui.web_app
+    monkeypatch.setattr(ui.web_app, "launch", lambda shared, **kw: calls.append(shared) or Result(True, "done", stop=True))
     main.main()
     assert calls == [agent]
-
-
-def test_dashboard_module_import_is_safe_without_creating_a_window():
-    from ui import app
-
-    assert app.answer_lines(Result(True, "KOVA answer", "extra detail")) == [
-        "KOVA answer", "extra detail"]
-    assert app.CHAT_KEEP > 0 and app.TRACE_KEEP > 0

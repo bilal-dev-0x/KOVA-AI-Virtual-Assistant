@@ -348,7 +348,10 @@ def app_windows(proc_names):
     windows = []
     def visit(hwnd, _):
         length = user32.GetWindowTextLengthW(hwnd)
-        if user32.IsWindowVisible(hwnd) and length and not cloaked(hwnd):
+        # Live test 7 Nov: Chrome's "Restore pages?" bubble counted as a second Chrome window.
+        # Bubbles and dialogs are owned by a window or are tool windows: not windows you'd name
+        popup = user32.GetWindow(hwnd, 4) or user32.GetWindowLongW(hwnd, -20) & 0x80
+        if user32.IsWindowVisible(hwnd) and length and not popup and not cloaked(hwnd):
             name = owner(hwnd)
             if name in wanted or (name == "applicationframehost.exe" and hosts_wanted_app(hwnd)):
                 title = ctypes.create_unicode_buffer(length + 1)
