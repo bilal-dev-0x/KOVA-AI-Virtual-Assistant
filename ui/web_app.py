@@ -4,7 +4,7 @@ import threading
 import time
 
 from desktop_agent import wake_words_from
-from modules import personas, voice_handler
+from modules import personas, startup, voice_handler
 from modules.logger import get_logger
 from ui import memory as memory_tab
 from ui import history as history_tab
@@ -133,6 +133,35 @@ def brain_footer(agent):
         or (name or "Local commands only")
 
 
+def gemini_key_set(config):
+    from brain import is_available
+    return is_available(config)
+
+
+def looks_like_gemini_key(key):
+    """Google API keys are one word of letters, digits, - and _ (usually starting AIza)."""
+    import re
+    return bool(re.fullmatch(r"[A-Za-z0-9_\-]{30,60}", key or ""))
+
+
+def brain_status(agent):
+    """What Settings may show about the brain: names and yes/no, never a key."""
+    config = agent.config
+    return {"footer": brain_footer(agent),
+            "gemini_key": gemini_key_set(config),
+            "provider": config.get("BRAIN_PROVIDER", "gemini"),
+            "server": config.get("SERVER_BRAIN", True) is not False}
+
+
+def use_new_brain(agent):
+    """After a new key: the next request goes to the new brain, in a fresh session."""
+    import brain
+    from modules import tools
+    agent.provider = brain.get_provider(agent.config)
+    tools.setup(agent.config, agent.provider)
+    agent.session = None
+
+
 # Four quick actions on Home, every one a real command the agent already knows.
 QUICK_ACTIONS = (
     ("System status", "system status"),
@@ -258,7 +287,46 @@ class JsApi:
                 "ALERTS_ON": bool(agent.config.get("ALERTS_ON", False)),
                 "PET_ON": bool(agent.config.get("PET_ON", False)),
                 "WAKE_WORDS": ", ".join(wake_words_from(agent.config)),
-                "PTT_HOTKEY": agent.config.get("PTT_HOTKEY", settings_tab.DEFAULTS["PTT_HOTKEY"])}
+                "PTT_HOTKEY": agent.config.get("PTT_HOTKEY", settings_tab.DEFAULTS["PTT_HOTKEY"]),
+                "START_WITH_WINDOWS": startup.is_enabled(),
+                "BRAIN": brain_status(agent)}
+
+    def first_run(self):
+        """True on the very first start without a Gemini key: the page then shows
+        the welcome sheet once. Nothing else of the config is read out."""
+        config = self._dashboard.agent.config
+        return {"show": not config.get("SETUP_DONE") and not gemini_key_set(config),
+                "PERSONAS": [{"id": pid, "name": personas.load(pid)["name"]} for pid in personas.all_ids()]}
+
+    def finish_setup(self, persona="", key=""):
+        """The welcome sheet's answer: a persona, maybe a Gemini key. The key is
+        written to config.json and never sent back to the page."""
+        agent = self._dashboard.agent
+        notes = []
+        if persona:
+            self.save({"PERSONA": persona})
+        if key:
+            answer = self.set_gemini_key(key)
+            notes.append(answer["message"])
+            if not answer["ok"]:
+                return {"ok": False, "message": answer["message"]}
+        settings_tab.save({"SETUP_DONE": True})
+        agent.config["SETUP_DONE"] = True
+        return {"ok": True, "message": " ".join(notes) or "All set."}
+
+    def set_gemini_key(self, key):
+        """Save a new Gemini key and switch the brain over now. Returns only ok and
+        a sentence; the key itself never travels back."""
+        key = str(key or "").strip()
+        if not looks_like_gemini_key(key):
+            return {"ok": False, "message": "That doesn't look like a Gemini API key."}
+        dashboard = self._dashboard
+        settings_tab.save({"GEMINI_API_KEY": key})
+        dashboard.agent.config["GEMINI_API_KEY"] = key
+        use_new_brain(dashboard.agent)
+        dashboard.refresh_boot()
+        log.info("Gemini key saved from the dashboard")
+        return {"ok": True, "message": "Key saved. " + brain_footer(dashboard.agent) + "."}
 
     def save(self, form):
         """Save through ui.settings: only changed keys are written. A hotkey
@@ -270,11 +338,19 @@ class JsApi:
                 refused.append(spec)
 
         changed = settings_tab.save_and_apply(self._dashboard.agent, form, on_hotkey=take_hotkey)
+        changed = dict(changed)
+        notes = []
+        wanted = form.get("START_WITH_WINDOWS")
+        if wanted is not None and bool(wanted) != startup.is_enabled():
+            ok, message = startup.enable() if wanted else startup.disable()
+            notes.append(message)
+            if ok:
+                changed["START_WITH_WINDOWS"] = bool(wanted)
         if "PET_ON" in changed:
             self._dashboard.set_pet(changed["PET_ON"])
         if "PERSONA" in changed:
             self._dashboard.refresh_boot()   # the new name and tint reach the page now
-        return {"changed": list(changed), "refused": refused}
+        return {"changed": list(changed), "refused": refused, "notes": notes}
 
 
 class WebDashboard:
@@ -302,6 +378,7 @@ class WebDashboard:
         self._error_until = 0.0
         self._last_reading = None
         self._pet_started = False
+        self._pending_user = None
         self._bound = {}                      # <Map> / <Unmap> hooks for run_ui
         self._prompt_token = 0                # one dialog at a time, known by token
         self._open_token = None
@@ -489,15 +566,21 @@ class WebDashboard:
     def show_user(self, text):
         self._status_override = None
         self._shown_state = None
-        saved = history_tab.append("user", text)
-        self._push({"t": "chat", "who": "user", "text": text,
-                    "id": saved.get("id") if saved else None})
+        # Saved with its answer: a misheard voice fragment that Max didn't catch is
+        # shown now but never kept (live check 9 Nov: "camera", "IMAX" filled the history)
+        self._pending_user = text
+        self._push({"t": "chat", "who": "user", "text": text, "id": None})
 
     def show_result(self, result, source):
         lines = messages_tab.answer_lines(result)
+        pending, self._pending_user = self._pending_user, None
+        noise = source in ("mic", "voice") and not result.success and \
+            (result.message or "").startswith("Sorry, I didn't catch that")
+        if pending and not noise:
+            history_tab.append("user", pending)
         if lines:
             text = "\n".join(lines)
-            saved = history_tab.append("max", text)
+            saved = None if noise else history_tab.append("max", text)
             self._push({"t": "chat", "who": "max", "text": text,
                         "note": None if result.success else "couldn't do that",
                         "id": saved.get("id") if saved else None})

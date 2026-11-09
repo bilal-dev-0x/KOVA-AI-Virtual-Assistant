@@ -129,8 +129,8 @@ B. Assistant screen: history file, thinking / working / approval / error states.
 C. Applications, Files, System, Activity with real data. **Implemented 8 Nov 2026** — see
    [`PHASE_C_REPORT.md`](PHASE_C_REPORT.md). Native screenshot review remains in Phase F.
 D. Mascot states, `speaking` flag, Max/Mira personas, floating companion. **Done 8 Nov 2026** — see [`PHASE_D_REPORT.md`](PHASE_D_REPORT.md).
-E. Settings (persona, start with Windows, brain status), first-launch screen when no key is set.
-F. Playwright and native screenshots of every screen, top five problems fixed, re-shot; CPU/RAM measured.
+E. Settings (persona, start with Windows, brain status), first-launch screen when no key is set. **Done 9 Nov 2026** — see [`PHASE_EF_REPORT.md`](PHASE_EF_REPORT.md).
+F. Playwright and native screenshots of every screen, top five problems fixed, re-shot; CPU/RAM measured. **Done 9 Nov 2026** — same report.
 Each phase ends with all tests passing and screenshots; Bilal is asked before the next phase.
 
 ## 9. Risks and dependencies

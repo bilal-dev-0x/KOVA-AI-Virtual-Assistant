@@ -155,6 +155,24 @@
 
 <div id="screen-result" class="screen-result" role="status" aria-live="polite"></div>
 
+<!-- the first start without a Gemini key: shown once -->
+<div class="overlay" id="welcome" hidden>
+  <div class="dialog welcome" role="dialog" aria-modal="true" aria-labelledby="welcome-title">
+    <img class="welcome-mark" src="assets/reaper_icon.png" alt="" width="56" height="56">
+    <h2 class="welcome-title" id="welcome-title">Welcome to KOVA</h2>
+    <p class="page-note">Your assistant on this PC. Opening apps, files, windows, reminders and system checks work right away, without any account.</p>
+    <div class="welcome-row"><span>Who do you want to talk to?</span><span id="welcome-persona"></span></div>
+    <label class="welcome-label" for="welcome-key">Gemini API key, for questions and longer tasks (optional)</label>
+    <input id="welcome-key" class="settings-input welcome-key" type="password" autocomplete="off" placeholder="Paste key, or skip">
+    <p class="page-note">Free from aistudio.google.com. It stays in config.json on this PC and is never shown again. You can add it later in Settings.</p>
+    <p class="welcome-note" id="welcome-note" role="status"></p>
+    <div class="dialog-actions">
+      <button class="dialog-btn" id="welcome-skip" type="button">Skip for now</button>
+      <button class="dialog-btn is-accent" id="welcome-start" type="button">Start</button>
+    </div>
+  </div>
+</div>
+
 <!-- the approval sheet: one at a time, one token at a time -->
 <div class="overlay" id="overlay" hidden>
   <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-question">

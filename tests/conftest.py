@@ -167,3 +167,10 @@ def no_real_pill(monkeypatch):
     """A test that sends the dashboard to the tray must never open a floating window."""
     import ui.pill
     monkeypatch.setattr(ui.pill.Pill, "show", lambda self: False)
+
+
+@pytest.fixture(autouse=True)
+def no_real_startup_folder(monkeypatch, tmp_path):
+    """No test reads or writes the real Startup folder."""
+    from modules import startup
+    monkeypatch.setattr(startup, "startup_dir", lambda: str(tmp_path / "no-startup"))

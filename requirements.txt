@@ -12,6 +12,7 @@ pywebview
 pystray
 pynput
 pyttsx3
+pywin32
 winrt-runtime
 winrt-Windows.Foundation
 winrt-Windows.Foundation.Collections

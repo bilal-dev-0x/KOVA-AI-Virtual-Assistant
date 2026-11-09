@@ -105,7 +105,7 @@ window.kova = (function () {
     const line = document.getElementById("assistant-line");
     const brain = document.getElementById("brain");
     if (line) {
-      line.textContent = event.assistant + " · your desktop assistant";
+      line.textContent = event.assistant + ", your desktop assistant";
     }
     if (brain) {
       brain.textContent = event.brain;
@@ -196,6 +196,7 @@ window.kova = (function () {
 
   function loadHistory() {
     if (typeof pywebview !== "undefined" && pywebview.api) {
+      welcome();
       pywebview.api.history().then(function (messages) {
         applyHistory({t: "history", messages: messages});
       }).catch(function () {
@@ -487,6 +488,9 @@ window.kova = (function () {
     form.appendChild(switchField("Reaper on the desktop", "a small round Reaper that stays on screen; double-click opens KOVA",
       current.PET_ON, "pet"));
 
+    form.appendChild(switchField("Start with Windows", "a shortcut in your own Startup folder; off removes it",
+      current.START_WITH_WINDOWS, "startup"));
+
     form.appendChild(textField("Wake words", "comma separated", current.WAKE_WORDS, "wake-words"));
     form.appendChild(textField("Listen-now key", "wakes Max without the wake word",
       current.PTT_HOTKEY, "hotkey"));
@@ -503,6 +507,7 @@ window.kova = (function () {
         VOICE: voiceSeg.value,
         ALERTS_ON: document.getElementById("set-alerts").checked,
         PET_ON: document.getElementById("set-pet").checked,
+        START_WITH_WINDOWS: document.getElementById("set-startup").checked,
         WAKE_WORDS: document.getElementById("set-wake-words").value,
         PTT_HOTKEY: document.getElementById("set-hotkey").value,
       };
@@ -520,11 +525,104 @@ window.kova = (function () {
             text += " " + answer.refused[0] + " was not accepted, the old key still works.";
           }
         }
+        if (answer.notes && answer.notes.length) {
+          text += " " + answer.notes.join(" ");
+        }
         status.textContent = text;
       });
     });
     actions.appendChild(save);
     form.appendChild(actions);
+    form.appendChild(brainSection(current.BRAIN || {}));
+  }
+
+  /* --- the brain: which one answers, whether a Gemini key is saved; the key never comes back --- */
+
+  function brainSection(brain) {
+    const box = document.createElement("div");
+    box.className = "settings-brain";
+    const title = document.createElement("h2");
+    title.className = "panel-title";
+    title.textContent = "Brain";
+    box.appendChild(title);
+    const now = document.createElement("p");
+    now.id = "brain-now";
+    now.textContent = brain.footer || "";
+    box.appendChild(now);
+    const key = field("Gemini API key", brain.gemini_key
+      ? "saved on this PC; paste a new one to replace it"
+      : "not set; free from aistudio.google.com, stays in config.json on this PC");
+    const input = document.createElement("input");
+    input.className = "settings-input";
+    input.id = "set-gemini-key";
+    input.type = "password";
+    input.autocomplete = "off";
+    input.placeholder = brain.gemini_key ? "Saved" : "Paste key";
+    key.row.appendChild(input);
+    box.appendChild(key.row);
+    const actions = document.createElement("div");
+    actions.className = "settings-actions";
+    const save = document.createElement("button");
+    save.className = "dialog-btn";
+    save.type = "button";
+    save.textContent = "Save key";
+    save.addEventListener("click", function () {
+      const value = input.value.trim();
+      if (!value) {
+        return;
+      }
+      pywebview.api.set_gemini_key(value).then(function (answer) {
+        input.value = "";
+        const status = document.getElementById("settings-status");
+        if (status) {
+          status.textContent = answer.message;
+        }
+        if (answer.ok) {
+          loadSettings();
+        }
+      });
+    });
+    actions.appendChild(save);
+    box.appendChild(actions);
+    return box;
+  }
+
+  /* --- first start without a key: one welcome sheet, then never again --- */
+
+  let welcomed = false;
+
+  function welcome() {
+    if (welcomed) {
+      return;
+    }
+    welcomed = true;
+    if (!window.pywebview || !pywebview.api || !pywebview.api.first_run) {
+      return;
+    }
+    pywebview.api.first_run().then(function (answer) {
+      const sheet = document.getElementById("welcome");
+      if (!answer.show || !sheet) {
+        return;
+      }
+      const seg = segmented((answer.PERSONAS || []).map(function (p) { return p.name; }), "Max");
+      document.getElementById("welcome-persona").appendChild(seg);
+      sheet.hidden = false;
+      const finish = function (withKey) {
+        const chosen = (answer.PERSONAS || []).find(function (p) { return p.name === seg.value; }) || {};
+        const key = withKey ? document.getElementById("welcome-key").value.trim() : "";
+        pywebview.api.finish_setup(chosen.id || "", key).then(function (result) {
+          const note = document.getElementById("welcome-note");
+          if (!result.ok) {
+            note.textContent = result.message;
+            note.classList.add("is-error");
+            return;
+          }
+          sheet.hidden = true;
+        });
+      };
+      document.getElementById("welcome-start").addEventListener("click", function () { finish(true); });
+      document.getElementById("welcome-skip").addEventListener("click", function () { finish(false); });
+    });
   }
 
   function field(name, note) {
@@ -764,7 +862,9 @@ window.kova = (function () {
       name.textContent = item.name;
       const meta = document.createElement("span");
       meta.className = "data-meta";
-      meta.textContent = item.is_dir ? "Folder · " + item.modified : formatBytes(item.size) + " · " + item.modified;
+      const changed = item.modified ? ", changed " + formatActivityTime(item.modified).replace(/^(Today|Yesterday)/,
+        function (word) { return word.toLowerCase(); }) : "";
+      meta.textContent = (item.is_dir ? "Folder" : formatBytes(item.size)) + changed;
       if (item.is_dir) {
         name.className = "data-link";
         name.tabIndex = 0;
@@ -866,14 +966,14 @@ window.kova = (function () {
     addSystemCard(grid, "CPU", snapshot.cpu_percent === null || snapshot.cpu_percent === undefined
       ? "Not available" : Math.round(snapshot.cpu_percent) + "%");
     addSystemCard(grid, "Memory", ram ? Number(ram.used_gb).toFixed(1) + " / " +
-      Number(ram.total_gb).toFixed(1) + " GB · " + Math.round(ram.percent) + "%" : "Not available");
+      Number(ram.total_gb).toFixed(1) + " GB (" + Math.round(ram.percent) + "%)" : "Not available");
     addSystemCard(grid, "GPU", snapshot.gpu_percent === null || snapshot.gpu_percent === undefined
       ? "Not available" : Math.round(snapshot.gpu_percent) + "%");
-    addSystemCard(grid, "Battery", battery ? Math.round(battery.percent) + "% · " +
-      (battery.plugged ? "Charging" : "On battery") : "Not available");
+    addSystemCard(grid, "Battery", battery ? Math.round(battery.percent) + "%, " +
+      (battery.plugged ? "charging" : "on battery") : "Not available");
     disks.forEach(function (disk) {
       addSystemCard(grid, "Disk " + disk.drive, Number(disk.free_gb).toFixed(1) + " GB free of " +
-        Number(disk.total_gb).toFixed(1) + " GB · " + Math.round(disk.percent) + "% used");
+        Number(disk.total_gb).toFixed(1) + " GB (" + Math.round(disk.percent) + "% used)");
     });
     processes.textContent = "";
     const rows = snapshot.processes || [];
@@ -938,7 +1038,7 @@ window.kova = (function () {
       const head = document.createElement("div");
       head.className = "activity-head";
       const title = document.createElement("strong");
-      title.textContent = (item.tool || "Undo") + (item.source ? " · " + item.source : "");
+      title.textContent = toolName(item.tool) + (item.source === "agent" ? " (AI)" : "");
       const time = document.createElement("time");
       time.textContent = formatActivityTime(item.time);
       head.append(title, time);
@@ -946,9 +1046,14 @@ window.kova = (function () {
       message.textContent = item.message || "No result details.";
       const meta = document.createElement("span");
       meta.className = "data-meta";
-      const approval = item.approval || "approval not recorded";
-      meta.textContent = (item.success ? "Succeeded" : "Failed") + " · " + approval +
-        (item.undo_text ? " · Reversible: " + item.undo_text : "");
+      const parts = [item.success ? "Done" : "Failed"];
+      if (APPROVAL_WORDS[item.approval]) {
+        parts.push(APPROVAL_WORDS[item.approval]);
+      }
+      if (item.undo_text) {
+        parts.push("can be undone (" + item.undo_text + ")");
+      }
+      meta.textContent = parts.join(", ") + ".";
       row.append(head, message, meta);
       if (item.undo_available) {
         row.appendChild(makeButton("Undo", function () {
@@ -957,6 +1062,22 @@ window.kova = (function () {
       }
       list.appendChild(row);
     });
+  }
+
+  // Plain words for the action log: tool ids and approval codes are for the code, not for people
+  const APPROVAL_WORDS = { confirmed: "you approved it", approved: "you approved it", declined: "you said no",
+                           "user asked": "you asked for it", denied: "you said no",
+                           blocked: "not allowed" };
+  const UPPER_WORDS = { cpu: "CPU", ram: "RAM", gpu: "GPU", ui: "UI", url: "URL", vs: "VS" };
+
+  function toolName(tool) {
+    if (!tool) {
+      return "Undo";
+    }
+    const words = String(tool).split("_").map(function (word) { return UPPER_WORDS[word] || word; });
+    const first = words[0];
+    words[0] = first === first.toUpperCase() ? first : first.charAt(0).toUpperCase() + first.slice(1);
+    return words.join(" ");
   }
 
   function formatActivityTime(value) {
@@ -997,7 +1118,7 @@ window.kova = (function () {
     const day = now.toLocaleString("en-GB", { weekday: "short" });
     const date = now.toLocaleString("en-GB", { day: "numeric", month: "short" });
     const time = now.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
-    clock.textContent = day + " " + date + " · " + time;
+    clock.textContent = day + " " + date + ", " + time;
   }
 
   function initPage() {

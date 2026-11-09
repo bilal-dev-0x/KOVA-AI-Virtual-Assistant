@@ -109,6 +109,8 @@ def test_settings_api_reads_only_its_four_keys():
             "GEMINI_API_KEY": "decoy-not-mine", "BRAIN_PROVIDER": "gemini",
         }
         form = dashboard.api.settings()
+        assert form.pop("START_WITH_WINDOWS") is False and form.pop("BRAIN")["gemini_key"] is True
+        assert "decoy" not in str(form)
         assert form.pop("PERSONAS") == [{"id": "max", "name": "Max"}, {"id": "mira", "name": "Mira"}]
         assert form == {"PERSONA": "max", "VOICE": "female", "ALERTS_ON": True, "PET_ON": False,
                         "WAKE_WORDS": "max, mac", "PTT_HOTKEY": "F9"}
@@ -122,7 +124,7 @@ def test_the_config_defaults_fill_the_form_when_keys_are_missing():
     try:
         dashboard.agent.config = {"ASSISTANT_NAME": "Max"}   # a fresh config: no VOICE/PTT keys
         form = dashboard.api.settings()
-        form.pop("PERSONAS")
+        form.pop("PERSONAS"), form.pop("START_WITH_WINDOWS"), form.pop("BRAIN")
         assert form == {"PERSONA": "max", "VOICE": "female", "ALERTS_ON": False, "PET_ON": False,
                         "WAKE_WORDS": "max", "PTT_HOTKEY": "Ctrl+Alt+M"}
     finally:
@@ -144,7 +146,7 @@ def test_save_goes_through_the_settings_module_and_reports_a_refused_hotkey(monk
         dashboard.on_hotkey = lambda spec: True   # a normal run: hotkey.start succeeds
         answered = dashboard.api.save({"VOICE": "male"})
         assert seen["agent"] is dashboard.agent
-        assert answered == {"changed": ["VOICE", "PTT_HOTKEY"], "refused": []}
+        assert answered == {"changed": ["VOICE", "PTT_HOTKEY"], "refused": [], "notes": []}
 
         dashboard.on_hotkey = lambda spec: False   # this run could not take the new key
         answered = dashboard.api.save({"VOICE": "male"})

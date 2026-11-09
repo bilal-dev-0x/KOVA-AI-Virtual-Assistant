@@ -204,7 +204,7 @@ def test_events_before_the_page_loads_are_buffered_in_order():
         assert payloads[1]["t"] == "chat"
         assert payloads[1]["who"] == "user"
         assert payloads[1]["text"] == "who greeted first"
-        assert payloads[1]["id"]
+        assert payloads[1]["id"] is None   # kept in the history only once its answer arrives
         assert payloads[2:] == [
                                 {"t": "trace", "line": "trace line"}]
     finally:
