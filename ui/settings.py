@@ -8,7 +8,7 @@ from modules.logger import get_logger
 log = get_logger()
 
 VOICES = ("male", "female")
-DEFAULTS = {"VOICE": "female", "ALERTS_ON": False, "PTT_HOTKEY": "Ctrl+Alt+M"}
+DEFAULTS = {"VOICE": "female", "ALERTS_ON": False, "PTT_HOTKEY": "Ctrl+Alt+M", "PET_ON": False}
 
 
 def parse_wake_words(text):
@@ -36,15 +36,26 @@ def changes(current, form):
     """
     wanted = {}
 
+    persona = form.get("PERSONA")
+    if persona and persona != (current.get("PERSONA") or "max"):
+        from modules import personas
+        chosen = personas.settings_for(persona)
+        if chosen:
+            # A persona brings its own name, voice and wake words; they win over the same boxes
+            wanted.update({key: value for key, value in chosen.items() if current.get(key) != value})
+
     voice = form.get("VOICE")
-    if voice in VOICES and voice != current.get("VOICE", DEFAULTS["VOICE"]):
+    if "VOICE" not in wanted and voice in VOICES and voice != current.get("VOICE", DEFAULTS["VOICE"]):
         wanted["VOICE"] = voice
 
     if form.get("ALERTS_ON") is not None and bool(form["ALERTS_ON"]) != bool(current.get("ALERTS_ON", False)):
         wanted["ALERTS_ON"] = bool(form["ALERTS_ON"])
 
+    if form.get("PET_ON") is not None and bool(form["PET_ON"]) != bool(current.get("PET_ON", False)):
+        wanted["PET_ON"] = bool(form["PET_ON"])
+
     words = parse_wake_words(form.get("WAKE_WORDS"))
-    if words and words != _wake_words(current):
+    if "WAKE_WORDS" not in wanted and words and words != _wake_words(current):
         wanted["WAKE_WORDS"] = words
 
     hotkey = (form.get("PTT_HOTKEY") or "").strip()
@@ -69,6 +80,10 @@ def apply(agent, changed, on_hotkey=None):
     """
     for key, value in changed.items():
         agent.config[key] = value
+
+    if "ASSISTANT_NAME" in changed:
+        agent.name = changed["ASSISTANT_NAME"]
+        agent.session = None   # the next request starts with the new name and manner
 
     if "VOICE" in changed:
         from modules import voice_handler

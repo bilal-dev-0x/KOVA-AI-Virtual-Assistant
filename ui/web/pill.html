@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>KOVA</title>
+<style>
+  :root { --bg: #10141d; --surface: #191f2b; --line: #262e3d; --accent: #26c6da; --text: #e6eaf0; --text-2: #8994a5;
+          --warning: #e8b45b; --danger: #ed6472; --font: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; }
+  html, body { height: 100%; margin: 0; overflow: hidden; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.4 var(--font); }
+  .pill { box-sizing: border-box; height: 100%; display: flex; align-items: center; gap: 10px; padding: 0 10px;
+          border: 1px solid var(--line); }
+  .mark { width: 40px; height: 40px; border-radius: 8px; background: #131722; flex: none; }
+  .words { min-width: 0; flex: 1; }
+  .name { font-weight: 600; }
+  .state { color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
+  .state::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: #4a5366; flex: none; }
+  .state.is-listening::before, .state.is-speaking::before { background: var(--accent); }
+  .state.is-thinking::before, .state.is-working::before, .state.is-approval::before { background: var(--warning); }
+  .state.is-error::before { background: var(--danger); }
+  button { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 6px;
+           height: 32px; padding: 0 10px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<div class="pill">
+  <img class="mark" src="assets/reaper_icon.png" alt="" width="40" height="40">
+  <div class="words"><div class="name" id="name">KOVA</div><div class="state" id="state">Starting</div></div>
+  <button id="talk" type="button" title="Listen once">Talk</button>
+  <button id="open" type="button" title="Open the dashboard">Open</button>
+</div>
+<script>
+  window.kovaPill = function (event) {
+    if (event.t === "state") {
+      const state = document.getElementById("state");
+      state.textContent = event.text;
+      state.className = "state is-" + (event.tone || "idle");
+    } else if (event.t === "boot") {
+      document.getElementById("name").textContent = event.assistant;
+    }
+  };
+  window.addEventListener("pywebviewready", function () {
+    document.getElementById("talk").addEventListener("click", function () { pywebview.api.talk(); });
+    document.getElementById("open").addEventListener("click", function () { pywebview.api.expand(); });
+  });
+</script>
+</body>
+</html>

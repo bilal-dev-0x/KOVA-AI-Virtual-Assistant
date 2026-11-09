@@ -55,7 +55,24 @@ window.kova = (function () {
       home.className = "home-state tone-" + (event.tone || "idle");
     }
     companionState(event.state || "idle");
+    const line = document.getElementById("home-line");
+    if (line) {
+      line.textContent = HOME_LINES[event.state] || HOME_LINES.idle;
+    }
   }
+
+  const HOME_LINES = {
+    idle: "I'm here. What are we working on?",
+    awake: "I'm listening.",
+    listening: "I'm listening.",
+    thinking: "Let me think about that.",
+    working: "On it.",
+    approval: "I need your okay for this.",
+    speaking: "Talking.",
+    error: "That didn't work. Want to try again?",
+    asleep: "Say my name, or type below.",
+    muted: "My mic is off. You can still type.",
+  };
 
   /* --- the companion: the Reaper loop plays only while Max is awake and the
      window is on screen; asleep or voice off shows the still frame, dimmed --- */
@@ -72,10 +89,11 @@ window.kova = (function () {
     if (!video) {
       return;
     }
-    const still = state === "asleep" || state === "muted" || document.hidden;
+    const still = state === "asleep" || state === "muted" || state === "error" || document.hidden;
     if (still) {
       video.pause();
     } else {
+      video.playbackRate = state === "thinking" ? 0.6 : 1;
       const playing = video.play();
       if (playing && playing.catch) {
         playing.catch(function () {});   // autoplay refused: the poster stays, nothing breaks
@@ -92,6 +110,8 @@ window.kova = (function () {
     if (brain) {
       brain.textContent = event.brain;
     }
+    document.body.dataset.tint = event.tint || "none";
+    document.body.dataset.persona = event.persona || "max";
     names.assistant = event.assistant;
     names.title = event.title;
     const input = document.getElementById("ask-input");
@@ -143,15 +163,34 @@ window.kova = (function () {
       seenMessages.add(event.id);
     }
     dropEmpty("chat-empty");
+    if (event.who === "max" && !event.note && !loadingHistory) {
+      beHappy();
+    }
     log.appendChild(bubble(event.who, event.text, event.note));
     trim(log);
   }
 
+  let loadingHistory = false;
+  let happyTimer = null;
+
+  function beHappy() {
+    // A finished job shows for two seconds, then the frame settles
+    const frame = document.getElementById("companion");
+    if (!frame) {
+      return;
+    }
+    frame.classList.add("is-happy");
+    clearTimeout(happyTimer);
+    happyTimer = setTimeout(function () { frame.classList.remove("is-happy"); }, 2000);
+  }
+
   function applyHistory(event) {
     historyReady = true;
+    loadingHistory = true;
     (event.messages || []).forEach(function (message) {
       applyChat({id: message.id, who: message.role, text: message.text});
     });
+    loadingHistory = false;
     chatWaitingForHistory.splice(0).forEach(applyChat);
   }
 
@@ -431,13 +470,22 @@ window.kova = (function () {
     }
     form.textContent = "";
 
-    const voice = field("Voice", "how Max sounds");
+    const persona = field("Persona", "name, voice and manner together");
+    const personaSeg = segmented((current.PERSONAS || []).map(function (p) { return p.name; }),
+      ((current.PERSONAS || []).find(function (p) { return p.id === current.PERSONA; }) || {}).name);
+    persona.row.appendChild(personaSeg);
+    form.appendChild(persona.row);
+
+    const voice = field("Voice", "only the sound; a persona sets it too");
     const voiceSeg = segmented(["male", "female"], current.VOICE);
     voice.row.appendChild(voiceSeg);   // was built but never placed: the row showed no control
     form.appendChild(voice.row);
 
     form.appendChild(switchField("Proactive alerts", "battery, RAM and disk warnings",
       current.ALERTS_ON, "alerts"));
+
+    form.appendChild(switchField("Reaper on the desktop", "a small round Reaper that stays on screen; double-click opens KOVA",
+      current.PET_ON, "pet"));
 
     form.appendChild(textField("Wake words", "comma separated", current.WAKE_WORDS, "wake-words"));
     form.appendChild(textField("Listen-now key", "wakes Max without the wake word",
@@ -451,8 +499,10 @@ window.kova = (function () {
     save.textContent = "Save";
     save.addEventListener("click", function () {
       const payload = {
+        PERSONA: ((current.PERSONAS || []).find(function (p) { return p.name === personaSeg.value; }) || {}).id,
         VOICE: voiceSeg.value,
         ALERTS_ON: document.getElementById("set-alerts").checked,
+        PET_ON: document.getElementById("set-pet").checked,
         WAKE_WORDS: document.getElementById("set-wake-words").value,
         PTT_HOTKEY: document.getElementById("set-hotkey").value,
       };
@@ -550,7 +600,7 @@ window.kova = (function () {
       const hour = new Date().getHours();
       const part = hour < 5 ? "Late night" : hour < 12 ? "Good morning"
         : hour < 17 ? "Good afternoon" : hour < 21 ? "Good evening" : "Good night";
-      element.textContent = part + ", " + names.title;
+      element.textContent = part + ".";
     }
     const date = document.getElementById("home-date");
     if (date) {
@@ -990,6 +1040,32 @@ window.kova = (function () {
     const send = document.getElementById("ask-send");
     if (send) {
       send.addEventListener("click", sendTyped);
+    }
+    // The Home box sends the same way, then shows the conversation
+    const homeInput = document.getElementById("home-input");
+    const sendFromHome = function () {
+      const text = homeInput.value.trim();
+      if (!text) {
+        return;
+      }
+      homeInput.value = "";
+      pywebview.api.send(text);
+      showPage("assistant");
+    };
+    if (homeInput) {
+      homeInput.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+          sendFromHome();
+        }
+      });
+    }
+    const homeSend = document.getElementById("home-send");
+    if (homeSend) {
+      homeSend.addEventListener("click", sendFromHome);
+    }
+    const homeMic = document.getElementById("home-mic");
+    if (homeMic) {
+      homeMic.addEventListener("click", function () { pywebview.api.talk(); });
     }
     const appsSearch = document.getElementById("apps-search");
     if (appsSearch) {

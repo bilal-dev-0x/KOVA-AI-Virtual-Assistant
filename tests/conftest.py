@@ -160,3 +160,10 @@ class FakeProvider(Provider):
     def search(self, query):
         self.searched.append(query)
         return self.search_answer
+
+
+@pytest.fixture(autouse=True)
+def no_real_pill(monkeypatch):
+    """A test that sends the dashboard to the tray must never open a floating window."""
+    import ui.pill
+    monkeypatch.setattr(ui.pill.Pill, "show", lambda self: False)

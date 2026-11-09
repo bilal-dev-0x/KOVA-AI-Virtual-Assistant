@@ -51,9 +51,11 @@ def test_boot_event_carries_everything_the_page_needs_and_nothing_of_the_config(
         "title": "Commander",
         "brain": "Gemini",
         "wake": "max",
+        "persona": "max",
+        "tint": "none",
         "quick": [{"label": label, "send": command} for label, command in QUICK_ACTIONS],
     }
-    assert set(event) == {"t", "assistant", "title", "brain", "wake", "quick"}
+    assert set(event) == {"t", "assistant", "title", "brain", "wake", "persona", "tint", "quick"}
     flattened = str(event)
     for secret in ("API_KEY", "BRAIN_PROVIDER", "SERVER_IP"):
         assert secret not in flattened

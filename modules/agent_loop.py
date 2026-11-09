@@ -73,11 +73,13 @@ log = get_logger()
 
 
 def system_prompt(config):
+    from modules import personas
     name = config.get("ASSISTANT_NAME", "KOVA")
     title = config.get("USER_TITLE", "Commander")
     return (
         f"You are {name}, an AI assistant running on the user's Windows PC. You act on the PC "
         f"only through the provided tools. Address the user as '{title}'. "
+        f"{personas.tone(config)} "
         "Your replies are spoken aloud: keep them short (one to three sentences), plain text, "
         "no markdown, lists or emojis. "
         "Use tools for every action and every live fact (system figures, time, news, weather, prices). "

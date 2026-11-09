@@ -58,31 +58,43 @@
 
     <!-- Home: who is here and what is happening now -->
     <section class="page is-active" id="page-home" aria-labelledby="greeting">
-      <div class="home-hero">
-        <figure class="companion" id="companion" data-state="idle">
-          <video id="companion-video" src="assets/reaper_idle.mp4" poster="assets/reaper_poster.jpg"
-                 muted loop playsinline preload="metadata"></video>
-        </figure>
-        <div class="home-words">
-          <h1 class="greeting" id="greeting">Hello</h1>
-          <p class="home-date" id="home-date"></p>
-          <p class="home-state" id="home-state">Starting</p>
+      <div class="home-layout">
+        <div class="home-main">
+          <div class="home-stage">
+            <p class="home-state" id="home-state">Starting</p>
+            <figure class="companion" id="companion" data-state="idle">
+              <video id="companion-video" src="assets/reaper_idle.mp4" poster="assets/reaper_poster.jpg"
+                     muted loop playsinline preload="metadata"></video>
+              <span class="level" aria-hidden="true"><i></i><i></i><i></i></span>
+            </figure>
+            <div class="home-words">
+              <h1 class="greeting" id="greeting">Hello</h1>
+              <p class="home-line" id="home-line">I'm here. What are we working on?</p>
+              <p class="home-date" id="home-date"></p>
+            </div>
+          </div>
+
+          <div class="quick" id="quick"></div>
+
+          <div class="askbar home-ask">
+            <input id="home-input" class="ask-input" type="text" autocomplete="off" spellcheck="false" placeholder="Ask Max to do something">
+            <button id="home-mic" class="icon-btn" type="button" title="Listen once (Ctrl+Alt+M)" aria-label="Listen once"><svg class="icon"><use href="#i-mic"/></svg></button>
+            <button id="home-send" class="icon-btn is-primary" type="button" title="Send" aria-label="Send"><svg class="icon"><use href="#i-send"/></svg></button>
+          </div>
         </div>
-      </div>
 
-      <div class="quick" id="quick"></div>
-
-      <div class="home-grid">
-        <section class="panel" aria-labelledby="home-sys-title">
-          <h2 class="panel-title" id="home-sys-title">This PC</h2>
-          <div class="meter"><span class="meter-name">CPU</span><span class="meter-bar"><i id="meter-cpu"></i></span><span class="meter-value" id="meter-cpu-value">–</span></div>
-          <div class="meter"><span class="meter-name">Memory</span><span class="meter-bar"><i id="meter-ram"></i></span><span class="meter-value" id="meter-ram-value">–</span></div>
-          <div class="meter"><span class="meter-name">Disk C:</span><span class="meter-bar"><i id="meter-disk"></i></span><span class="meter-value" id="meter-disk-value">–</span></div>
-        </section>
-        <section class="panel" aria-labelledby="home-recent-title">
-          <h2 class="panel-title" id="home-recent-title">Done this session</h2>
-          <ol class="recent" id="recent"><li class="empty">Nothing yet. Ask Max to open an app or find a file.</li></ol>
-        </section>
+        <aside class="home-side">
+          <section class="panel" aria-labelledby="home-sys-title">
+            <h2 class="panel-title" id="home-sys-title">This PC</h2>
+            <div class="meter"><span class="meter-name">CPU</span><span class="meter-bar"><i id="meter-cpu"></i></span><span class="meter-value" id="meter-cpu-value">–</span></div>
+            <div class="meter"><span class="meter-name">Memory</span><span class="meter-bar"><i id="meter-ram"></i></span><span class="meter-value" id="meter-ram-value">–</span></div>
+            <div class="meter"><span class="meter-name">Disk C:</span><span class="meter-bar"><i id="meter-disk"></i></span><span class="meter-value" id="meter-disk-value">–</span></div>
+          </section>
+          <section class="panel" aria-labelledby="home-recent-title">
+            <h2 class="panel-title" id="home-recent-title">Done this session</h2>
+            <ol class="recent" id="recent"><li class="empty">Nothing yet. Ask Max to open an app or find a file.</li></ol>
+          </section>
+        </aside>
       </div>
     </section>
 

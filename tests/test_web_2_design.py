@@ -32,9 +32,11 @@ def test_design_tokens_are_the_ones_prompt_txt_sets():
 
 def test_no_glow_gradient_blur_or_shadow():
     # Bilal rejected the glowing look (7 Nov); prompt.txt: no glowing borders or random neon
+    # the one allowed fade is the mask that hides the video clip's rectangle, not decoration
+    css = re.sub(r"-webkit-mask-image:[^;]*;", "", CSS)
     for banned in ("box-shadow", "text-shadow", "backdrop-filter", "linear-gradient", "radial-gradient",
                    "filter: blur", "drop-shadow"):
-        assert banned not in CSS, banned
+        assert banned not in css, banned
 
 
 def test_no_all_caps_labels():

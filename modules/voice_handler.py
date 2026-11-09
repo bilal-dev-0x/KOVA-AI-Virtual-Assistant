@@ -128,7 +128,24 @@ def _speak_offline(text):
     del engine
 
 
+_speaking = False
+
+
+def is_speaking():
+    """True while a line is being said out loud (the window shows Max speaking)."""
+    return _speaking
+
+
 def speak(text):
+    global _speaking
+    _speaking = True
+    try:
+        _say(text)
+    finally:
+        _speaking = False
+
+
+def _say(text):
     text = _pronounce(text)
     try:
         _speak_online(text)

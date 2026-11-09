@@ -4,6 +4,7 @@ import threading
 import time
 
 from desktop_agent import wake_words_from
+from modules import personas, voice_handler
 from modules.logger import get_logger
 from ui import memory as memory_tab
 from ui import history as history_tab
@@ -11,6 +12,7 @@ from ui import messages as messages_tab
 from ui import settings as settings_tab
 from ui import stats as stats_tab
 from ui import data as data_tab
+from ui.pill import Pet, Pill
 
 # The new dashboard window: PyWebView (Edge WebView2) showing ui/web/. Only the
 # window layer of the classic CustomTkinter app is replaced here — the same
@@ -38,6 +40,7 @@ STATES = {"idle": ("Ready", "idle"),
           "awake": ("Listening", "listening"),
           "listening": ("Listening", "listening"),
           "thinking": ("Thinking", "thinking"),
+          "speaking": ("Speaking", "speaking"),
           "working": ("Working", "working"),
           "approval": ("Waiting for approval", "approval"),
           "error": ("Request failed", "error"),
@@ -147,6 +150,8 @@ def boot_event(agent, brain):
             "title": agent.title,
             "brain": brain,
             "wake": (wake_words_from(agent.config) or ["Max"])[0],
+            "persona": (personas.current(agent.config) or {}).get("id", "max"),
+            "tint": (personas.current(agent.config) or {}).get("tint", "none"),
             "quick": [{"label": label, "send": command} for label, command in QUICK_ACTIONS]}
 
 
@@ -247,8 +252,11 @@ class JsApi:
         """The four keys the Settings page may read, nothing else. The config
         holds API keys, and none of them ever travel to the page."""
         agent = self._dashboard.agent
-        return {"VOICE": agent.config.get("VOICE", settings_tab.DEFAULTS["VOICE"]),
+        return {"PERSONA": (personas.current(agent.config) or {}).get("id", "max"),
+                "PERSONAS": [{"id": pid, "name": personas.load(pid)["name"]} for pid in personas.all_ids()],
+                "VOICE": agent.config.get("VOICE", settings_tab.DEFAULTS["VOICE"]),
                 "ALERTS_ON": bool(agent.config.get("ALERTS_ON", False)),
+                "PET_ON": bool(agent.config.get("PET_ON", False)),
                 "WAKE_WORDS": ", ".join(wake_words_from(agent.config)),
                 "PTT_HOTKEY": agent.config.get("PTT_HOTKEY", settings_tab.DEFAULTS["PTT_HOTKEY"])}
 
@@ -262,6 +270,10 @@ class JsApi:
                 refused.append(spec)
 
         changed = settings_tab.save_and_apply(self._dashboard.agent, form, on_hotkey=take_hotkey)
+        if "PET_ON" in changed:
+            self._dashboard.set_pet(changed["PET_ON"])
+        if "PERSONA" in changed:
+            self._dashboard.refresh_boot()   # the new name and tint reach the page now
         return {"changed": list(changed), "refused": refused}
 
 
@@ -271,7 +283,7 @@ class WebDashboard:
     are the event payloads and the bridge flow."""
 
     def __init__(self, controller, agent, speak=None, on_hide=None, on_quit=None,
-                 on_hotkey=None, create_window=None, stats_factory=None):
+                 on_hotkey=None, create_window=None, stats_factory=None, pill_window=None):
         self.controller = controller
         self.agent = agent
         self.speak = speak
@@ -289,6 +301,7 @@ class WebDashboard:
         self._status_override = None
         self._error_until = 0.0
         self._last_reading = None
+        self._pet_started = False
         self._bound = {}                      # <Map> / <Unmap> hooks for run_ui
         self._prompt_token = 0                # one dialog at a time, known by token
         self._open_token = None
@@ -307,6 +320,11 @@ class WebDashboard:
             width=1180, height=760, min_size=(900, 600), resizable=True,
             background_color="#0b0d12", text_select=True)
         self._bind_window_events()
+        # The floating companion, made only the first time the dashboard goes to the tray
+        self.pill = Pill(on_open=lambda: self.show(), on_talk=lambda: self.controller.push_to_talk(),
+                         create_window=pill_window)
+        self.pet = Pet(on_open=lambda: self.show(), on_talk=lambda: self.controller.push_to_talk(),
+                       create_window=pill_window)
 
         if stats_factory is None:
             stats_factory = lambda push: stats_tab.StatsCollector(push=push)
@@ -348,7 +366,8 @@ class WebDashboard:
         ran = self.controller.bridge.next_call(timeout=0.1)
         if ran:
             return   # what that work pushed goes out on the next tick
-        if self._visible:
+        if self._visible or self.pet.window is not None or self.pill.window is not None:
+            # The desktop Reaper and the pill follow Max while the dashboard is hidden too
             self._mirror_state()
 
     def _flush_pending(self):
@@ -381,9 +400,13 @@ class WebDashboard:
             # A failed request is news for a few seconds, not a state Max stays in
             self._status_override = None
         state = self._status_override or self.controller.state
+        if voice_handler.is_speaking() and state in ("idle", "thinking", "awake", "asleep", "working"):
+            state = "speaking"   # the real flag from the voice layer, never guessed
         if state != self._shown_state:
             self._shown_state = state
             self._push(state_event(state))
+            self.pill.push(state_event(state))
+            self.pet.push(state_event(state))
 
     # ---------- events from the window ----------
 
@@ -393,6 +416,23 @@ class WebDashboard:
         with self._lock:
             self._buffer.insert(0, self._my_boot_event())
         self._ready = True    # the pump flushes the buffer on its next tick
+        if self.agent.config.get("PET_ON") and not self._pet_started:
+            self._pet_started = True
+            self.set_pet(True)
+
+    def set_pet(self, on):
+        """The Reaper on the desktop, on or off, right now."""
+        if on:
+            self.pet.show()
+            self.pet.push(self._my_boot_event())
+        else:
+            self.pet.hide()
+
+    def refresh_boot(self):
+        self._push(self._my_boot_event())
+        self.pill.push(self._my_boot_event())
+        self.pet.push(self._my_boot_event())
+        self._shown_state = None
 
     def _my_boot_event(self):
         return boot_event(self.agent, brain_footer(self.agent))
@@ -433,11 +473,13 @@ class WebDashboard:
     def show(self):
         self._window.show()
         self._set_visible(True)
+        self.pill.hide()
 
     def withdraw(self):
         """To the tray: the window goes, Max keeps working."""
         self._window.hide()
         self._set_visible(False)
+        self.pill.show()
         self._shown_state = None   # re-showing puts the status up again
 
     def show_notice(self, message):
@@ -462,6 +504,7 @@ class WebDashboard:
             if source == "ui":
                 self._push({"t": "screen-result", "text": text,
                             "success": bool(result.success)})
+            self.pet.push({"t": "done", "success": bool(result.success)})
         self._status_override = None if result.success else "error"
         self._error_until = time.monotonic() + ERROR_SHOWN_SECONDS
         self._shown_state = None
@@ -578,6 +621,8 @@ class WebDashboard:
         if stats is not None:
             stats.stop()
         self._ready = False   # no more sends into a dead window
+        self.pill.destroy()
+        self.pet.destroy()
         try:
             self._window.destroy()
         except Exception:

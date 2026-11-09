@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>KOVA companion</title>
+<style>
+  :root { --stage: #131722; --accent: #26c6da; --warning: #e8b45b; --danger: #ed6472; --idle: #262e3d; }
+  html, body { height: 100%; margin: 0; overflow: hidden; background: var(--stage); user-select: none; cursor: default; }
+  .disc { box-sizing: border-box; width: 100%; height: 100%; border-radius: 50%; border: 5px solid var(--idle);
+          overflow: hidden; position: relative; transition: border-color .2s ease; }
+  .disc video { width: 100%; height: 100%; object-fit: cover; display: block; transform: scale(1.12); pointer-events: none; }
+  .disc.is-listening, .disc.is-speaking { border-color: var(--accent); }
+  .disc.is-thinking, .disc.is-working, .disc.is-approval { border-color: var(--warning); }
+  .disc.is-error { border-color: var(--danger); }
+  .disc.is-asleep video, .disc.is-muted video { opacity: .55; }
+  /* the app's moments, never invented: listening breathes, thinking slows, a done job pops */
+  .disc.is-listening { animation: breathe 1.6s ease-in-out infinite; }
+  .disc.is-thinking video { animation: sway 2.4s ease-in-out infinite; }
+  .disc.is-working video { animation: sway 1.2s ease-in-out infinite; }
+  .disc.pop video { transform: scale(1.2); transition: transform .25s ease; }
+  .disc.oops { border-color: var(--danger); }
+  @keyframes breathe { 0%, 100% { border-color: var(--accent); } 50% { border-color: #1b7f8c; } }
+  @keyframes sway { 0%, 100% { transform: scale(1.12) rotate(-3deg); } 50% { transform: scale(1.12) rotate(3deg); } }
+  .level { position: absolute; left: 0; right: 0; bottom: 18px; height: 14px; display: none; justify-content: center; align-items: flex-end; gap: 4px; }
+  .disc.is-speaking .level { display: flex; }
+  .level i { width: 4px; height: 100%; background: var(--accent); border-radius: 2px; transform-origin: bottom; animation: level .9s ease infinite alternate; }
+  .level i:nth-child(2) { animation-duration: .65s; }
+  .level i:nth-child(3) { animation-duration: 1.1s; }
+  @keyframes level { from { transform: scaleY(.25); } to { transform: scaleY(1); } }
+  @media (prefers-reduced-motion: reduce) { .level i, .disc, .disc video { animation: none !important; } }
+</style>
+</head>
+<body>
+<div class="disc is-idle" id="disc" title="Double-click to open KOVA">
+  <video id="v" src="assets/reaper_idle.mp4" poster="assets/reaper_poster.jpg" muted loop playsinline autoplay></video>
+  <span class="level" aria-hidden="true"><i></i><i></i><i></i></span>
+</div>
+<script>
+  const disc = document.getElementById("disc");
+  const video = document.getElementById("v");
+  let flash = null;
+  window.kovaPill = function (event) {
+    if (event.t === "done") {
+      // a finished job: a quick pop when it worked, a red ring when it didn't
+      const mark = event.success ? "pop" : "oops";
+      disc.classList.add(mark);
+      clearTimeout(flash);
+      flash = setTimeout(function () { disc.classList.remove("pop", "oops"); }, event.success ? 600 : 2000);
+      return;
+    }
+    if (event.t !== "state") { return; }
+    disc.classList.remove("is-idle", "is-listening", "is-speaking", "is-thinking", "is-working",
+                          "is-approval", "is-error", "is-asleep", "is-muted");
+    disc.classList.add("is-" + (event.tone || "idle"));
+    const still = event.state === "asleep" || event.state === "muted" || event.state === "error";
+    if (still) { video.pause(); }
+    else { video.playbackRate = event.state === "thinking" ? 0.6 : 1; const p = video.play(); if (p && p.catch) { p.catch(function () {}); } }
+  };
+  document.addEventListener("visibilitychange", function () {
+    if (document.hidden) { video.pause(); } else if (!disc.classList.contains("is-asleep")) { video.play().catch(function () {}); }
+  });
+  disc.addEventListener("dblclick", function () {
+    if (window.pywebview && pywebview.api) { pywebview.api.expand(); }
+  });
+</script>
+</body>
+</html>

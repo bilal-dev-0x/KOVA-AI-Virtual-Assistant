@@ -476,6 +476,9 @@ def test_period_range():
 
 def test_activity_tool_reads_the_action_log(monkeypatch, history):
     monkeypatch.setattr(actions, "ACTIONS_LOG", str(history))
+    real_range = activity.period_range
+    # "this week" must mean the week of the log lines, not of the day the tests run
+    monkeypatch.setattr(activity, "period_range", lambda period, now=None: real_range(period, now or NOW))
     result = agent()[0].handle("which apps did i open most this week")
     assert result.success and "chrome" in result.message
 
