@@ -11,7 +11,8 @@ def get_provider(config):
     """The AI provider from config.json, or None (Max then runs local commands only).
 
     BRAIN_PROVIDER:
-      "gemini" - Gemini first, the KOVA server when Gemini can't answer (SERVER_BRAIN: false = Gemini only)
+      "gemini" - Gemini first, then OpenRouter (when OPENROUTER_API_KEY is set), then the KOVA server
+                 when the others can't answer (SERVER_BRAIN: false = no server)
       "server" - only the KOVA server (Ollama on the old laptop)
       "relay"  - Claude Code answers from a chat session, for testing
     """
@@ -22,14 +23,25 @@ def get_provider(config):
     if choice == "server":
         from brain.server import ServerProvider
         return ServerProvider(config)
-    if choice == "gemini" and is_available(config):
-        from brain.gemini import GeminiProvider
-        gemini = GeminiProvider(config)
-        if config.get("SERVER_BRAIN", True) is False:
-            return gemini
+    if choice == "gemini":
+        # Gemini, then OpenRouter, then the KOVA server: each one that is set up joins the chain
+        from brain import openrouter
+        chain = []
+        if is_available(config):
+            from brain.gemini import GeminiProvider
+            chain.append(GeminiProvider(config))
+        if openrouter.is_available(config):
+            chain.append(openrouter.OpenRouterProvider(config))
+        if not chain:
+            return None
+        if config.get("SERVER_BRAIN", True) is not False:
+            from brain.server import ServerProvider
+            chain.append(ServerProvider(config))
         from brain.hybrid import HybridProvider
-        from brain.server import ServerProvider
-        return HybridProvider(gemini, ServerProvider(config))
+        provider = chain[-1]
+        for brain in reversed(chain[:-1]):
+            provider = HybridProvider(brain, provider)
+        return provider
     return None
 
 

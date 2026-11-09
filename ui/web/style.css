@@ -280,6 +280,8 @@ body[data-tint="warm"] .companion video { filter: hue-rotate(150deg) saturate(1.
 .welcome-note.is-error { color: var(--danger); margin: 0; }
 .settings-brain { margin-top: var(--s5); }
 #brain-now { margin: 0 0 var(--s2); color: var(--text-2); }
+.key-pair { display: flex; gap: var(--s2); }
+.key-pair .settings-input { width: min(280px, 40vw); }
 .dialog { width: min(440px, 90vw); background: var(--surface); border: 0; border-radius: var(--r-frame);
           padding: var(--s3) var(--s4) var(--s4); animation: enter .15s var(--ease); }
 .dialog-head { display: flex; align-items: center; justify-content: space-between; }

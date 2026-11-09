@@ -549,29 +549,33 @@ window.kova = (function () {
     now.id = "brain-now";
     now.textContent = brain.footer || "";
     box.appendChild(now);
-    const key = field("Gemini API key", brain.gemini_key
+    box.appendChild(keyRow("Gemini API key", "gemini", brain.gemini_key,
+      "free from aistudio.google.com", "set_gemini_key"));
+    box.appendChild(keyRow("OpenRouter API key", "openrouter", brain.openrouter_key,
+      "from openrouter.ai; answers when Gemini can't", "set_openrouter_key"));
+    return box;
+  }
+
+  function keyRow(name, id, saved, where, method) {
+    const key = field(name, saved
       ? "saved on this PC; paste a new one to replace it"
-      : "not set; free from aistudio.google.com, stays in config.json on this PC");
+      : "not set; " + where + ". It stays in config.json on this PC");
     const input = document.createElement("input");
     input.className = "settings-input";
-    input.id = "set-gemini-key";
+    input.id = "set-" + id + "-key";
     input.type = "password";
     input.autocomplete = "off";
-    input.placeholder = brain.gemini_key ? "Saved" : "Paste key";
-    key.row.appendChild(input);
-    box.appendChild(key.row);
-    const actions = document.createElement("div");
-    actions.className = "settings-actions";
+    input.placeholder = saved ? "Saved" : "Paste key";
     const save = document.createElement("button");
     save.className = "dialog-btn";
     save.type = "button";
-    save.textContent = "Save key";
+    save.textContent = "Save";
     save.addEventListener("click", function () {
       const value = input.value.trim();
       if (!value) {
         return;
       }
-      pywebview.api.set_gemini_key(value).then(function (answer) {
+      pywebview.api[method](value).then(function (answer) {
         input.value = "";
         const status = document.getElementById("settings-status");
         if (status) {
@@ -582,9 +586,11 @@ window.kova = (function () {
         }
       });
     });
-    actions.appendChild(save);
-    box.appendChild(actions);
-    return box;
+    const pair = document.createElement("div");
+    pair.className = "key-pair";
+    pair.append(input, save);
+    key.row.appendChild(pair);
+    return key.row;
   }
 
   /* --- first start without a key: one welcome sheet, then never again --- */

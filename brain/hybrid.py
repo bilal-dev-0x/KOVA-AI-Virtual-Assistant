@@ -19,6 +19,15 @@ READ_NOTE = "🖥️  Gemini can't look right now: reading the screen's text for
 
 log = get_logger()
 
+LABELS = {"gemini": "Gemini", "openrouter": "OpenRouter", "server": "the KOVA server",
+          "relay": "the relay"}
+
+
+def label(provider, default):
+    """How a brain is named in notes and errors: a chain is named by its first link."""
+    name = getattr(provider, "name", "") or ""
+    return LABELS.get(name.split("+")[0], default)
+
 
 class HybridProvider(Provider):
     name = "gemini+server"
@@ -26,6 +35,11 @@ class HybridProvider(Provider):
     def __init__(self, primary, backup):
         self.primary = primary
         self.backup = backup
+        names = (getattr(primary, "name", ""), getattr(backup, "name", ""))
+        if names != ("gemini", "server") and all(n.split("+")[0] in LABELS for n in names):
+            # Gemini -> OpenRouter -> server is two of these, one inside the other
+            self.name = "+".join(names)
+        self.first, self.second = label(primary, "Gemini"), label(backup, "the KOVA server")
         self._primary_back_at = 0.0  # Gemini is tried again from this time on
         self._warmed = False
         self._warming = None  # the warm-up thread while it runs
@@ -83,8 +97,10 @@ class HybridProvider(Provider):
 
     def primary_failed(self, error):
         if self.primary_ok():
-            log.warning("Gemini failed (%s), the KOVA server answers for the next %s minutes", error, BACKUP_MINUTES)
-            print(SWITCH_NOTE)
+            log.warning("%s failed (%s), %s answers for the next %s minutes",
+                        self.first, error, self.second, BACKUP_MINUTES)
+            print(SWITCH_NOTE if (self.first, self.second) == ("Gemini", "the KOVA server")
+                  else f"🖥️  {self.first} can't answer right now, so {self.second} will.")
         self._primary_back_at = time.time() + BACKUP_MINUTES * 60
 
     def session(self, system_prompt, tools):
@@ -138,7 +154,8 @@ class HybridSession(Session):
         try:
             return self._session("backup").send(text)
         except BrainError as e:
-            raise BrainError(f"Gemini can't answer right now, and {str(e)[0].lower()}{str(e)[1:]}") from e
+            raise BrainError(f"{self.provider.first} can't answer right now, and "
+                             f"{str(e)[0].lower()}{str(e)[1:]}") from e
 
     def send_results(self, results):
         # Tool results go back to the brain that asked for them: the other one never saw the calls
@@ -158,7 +175,8 @@ class HybridSession(Session):
         try:
             return self._session("backup").send(f"{self._text}\n(These steps already ran, don't repeat them: {ran})")
         except BrainError as e:
-            raise BrainError(f"Gemini can't answer right now, and {str(e)[0].lower()}{str(e)[1:]}") from e
+            raise BrainError(f"{self.provider.first} can't answer right now, and "
+                             f"{str(e)[0].lower()}{str(e)[1:]}") from e
 
     def reset(self):
         for session in self._sessions.values():

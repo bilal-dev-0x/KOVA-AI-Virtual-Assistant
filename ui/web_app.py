@@ -118,24 +118,48 @@ def webview_runtime_found():
     return os.path.isdir(r"C:\Program Files (x86)\Microsoft\EdgeWebView\Application")
 
 
+BRAIN_NAMES = {"gemini": "Gemini", "openrouter": "OpenRouter", "server": "KOVA server", "relay": "Relay"}
+
+
 def brain_footer(agent):
     """The real brain answering right now, said plainly for the footer."""
     provider = getattr(agent, "provider", None)
     if provider is None:
         return "Local commands only"
     name = getattr(provider, "name", "none")
+    if name and name != "gemini+server" and "+" in name:
+        # A longer chain: Gemini, then OpenRouter, then the KOVA server
+        names = [BRAIN_NAMES.get(part, part) for part in name.split("+")]
+        primary = getattr(provider, "primary", None)
+        if primary is not None and not provider.primary_ok():
+            return f"Brain: {names[1]} ({names[0]} resting)"
+        if names[-1] == "KOVA server" and len(names) > 1:
+            return "Brain: " + ", then ".join(names[:-1]) + ", with the KOVA server as backup"
+        return "Brain: " + ", then ".join(names)
     if name == "gemini+server":
         primary = getattr(provider, "primary", None)
         if primary is not None and not provider.primary_ok():
             return "Brain: KOVA server (Gemini resting)"
         return "Brain: Gemini, with the KOVA server as backup"
-    return {"gemini": "Gemini", "server": "KOVA server", "relay": "Relay, for testing"}.get(name) \
+    return {"gemini": "Gemini", "openrouter": "OpenRouter", "server": "KOVA server",
+            "relay": "Relay, for testing"}.get(name) \
         or (name or "Local commands only")
 
 
 def gemini_key_set(config):
     from brain import is_available
     return is_available(config)
+
+
+def openrouter_key_set(config):
+    from brain import openrouter
+    return openrouter.is_available(config)
+
+
+def looks_like_openrouter_key(key):
+    """OpenRouter keys start with sk-or- and are one word."""
+    import re
+    return bool(re.fullmatch(r"sk-or-[A-Za-z0-9_\-]{20,120}", key or ""))
 
 
 def looks_like_gemini_key(key):
@@ -149,6 +173,7 @@ def brain_status(agent):
     config = agent.config
     return {"footer": brain_footer(agent),
             "gemini_key": gemini_key_set(config),
+            "openrouter_key": openrouter_key_set(config),
             "provider": config.get("BRAIN_PROVIDER", "gemini"),
             "server": config.get("SERVER_BRAIN", True) is not False}
 
@@ -295,7 +320,8 @@ class JsApi:
         """True on the very first start without a Gemini key: the page then shows
         the welcome sheet once. Nothing else of the config is read out."""
         config = self._dashboard.agent.config
-        return {"show": not config.get("SETUP_DONE") and not gemini_key_set(config),
+        return {"show": not config.get("SETUP_DONE") and not gemini_key_set(config)
+                and not openrouter_key_set(config),
                 "PERSONAS": [{"id": pid, "name": personas.load(pid)["name"]} for pid in personas.all_ids()]}
 
     def finish_setup(self, persona="", key=""):
@@ -317,15 +343,22 @@ class JsApi:
     def set_gemini_key(self, key):
         """Save a new Gemini key and switch the brain over now. Returns only ok and
         a sentence; the key itself never travels back."""
+        return self._set_key("GEMINI_API_KEY", key, looks_like_gemini_key, "Gemini")
+
+    def set_openrouter_key(self, key):
+        """The same for OpenRouter, the brain between Gemini and the KOVA server."""
+        return self._set_key("OPENROUTER_API_KEY", key, looks_like_openrouter_key, "OpenRouter")
+
+    def _set_key(self, setting, key, check, name):
         key = str(key or "").strip()
-        if not looks_like_gemini_key(key):
-            return {"ok": False, "message": "That doesn't look like a Gemini API key."}
+        if not check(key):
+            return {"ok": False, "message": f"That doesn't look like a {name} API key."}
         dashboard = self._dashboard
-        settings_tab.save({"GEMINI_API_KEY": key})
-        dashboard.agent.config["GEMINI_API_KEY"] = key
+        settings_tab.save({setting: key})
+        dashboard.agent.config[setting] = key
         use_new_brain(dashboard.agent)
         dashboard.refresh_boot()
-        log.info("Gemini key saved from the dashboard")
+        log.info("%s key saved from the dashboard", name)
         return {"ok": True, "message": "Key saved. " + brain_footer(dashboard.agent) + "."}
 
     def save(self, form):
