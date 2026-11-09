@@ -24,3 +24,4 @@ logs/
 # Local memory and routines
 data/
 routines.json
+.claude/

@@ -1,7 +1,7 @@
 # KOVA product plan: audit and design (prompt.txt, Prompt 2)
 
 Written 8 Nov 2026. This document records the audit and staged product plan; implementation status is tracked in section 8 and the phase reports.
-Toolkit used: Anthropic **frontend-design** guidance (read in full and applied below); **Playwright** with the
+Toolkit used: **frontend-design** guidance (read in full and applied below); **Playwright** with the
 installed Edge for page screenshots. Taste was dropped (Bilal, 8 Nov); Visual Eyes was not installed (its installer
 pipes a downloaded script into bash) and is replaced by the same Playwright screenshot loop.
 
@@ -40,7 +40,7 @@ pipes a downloaded script into bash) and is replaced by the same Playwright scre
 - Gemini's free tier (100 requests a day) runs out in an evening; the server then answers in 10-80 s.
 - Google speech gives no confidence score most of the time (now logged as "?", not a fake 0.50).
 - Notepad: typed text lands where the cursor is (start of an opened file).
-- The laptop runs at 70-90 % RAM; Claude Code twice stopped the dashboard for low memory.
+- The laptop runs at 70-90 % RAM; the coding tool twice stopped the dashboard for low memory.
 
 ## 2. Current architecture
 ```

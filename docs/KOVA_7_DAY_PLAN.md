@@ -10,7 +10,7 @@
 
 ## Ground rules
 1. **Max works at the end of every day.** Each day ends tested, committed and pushed. If a day runs late, we drop *Stretch* items first, then *Advanced* ones. *Core* items always ship.
-2. **Claude builds, you test.** Claude writes the code and the automated tests and explains each module briefly. You test what needs your PC (mic, apps, games, screen): about 30–60 min a day.
+2. **The builder builds, you test.** The builder writes the code and the automated tests and explains each module briefly. You test what needs your PC (mic, apps, games, screen): about 30–60 min a day.
 3. **Roadmap rules still apply:**
    - local first, AI on demand;
    - no constant polling or recording;
@@ -130,7 +130,7 @@ Commits: `b6699f2`, `8a92035`, `d2365b8` (the last three fixes are not committed
 
 *Built (not committed yet):*
 - every Core item and both Advanced items;
-- each step was reviewed by a second Claude session, and all its findings were fixed.
+- each step was reviewed by a second review session, and all its findings were fixed.
 
 *Not done:* Stretch (moved to Day 5).
 
@@ -280,8 +280,8 @@ Run with `python main.py --ui`. Automated coverage: 1236 tests passed; manual mi
 - Plugin marketplace and profile UI.
 
 ## Daily routine
-1. **Start:** Claude restates the day's goal and the logic of each module (≈5 min to read).
-2. **Build:** Claude writes the code and tests, then runs the automated tests.
+1. **Start:** the builder restates the day's goal and the logic of each module (≈5 min to read).
+2. **Build:** the builder writes the code and tests, then runs the automated tests.
 3. **You test:** voice, real apps, screen, games. You report what broke.
 4. **Fix → commit → push**, with your OK; tick the day's boxes here.
 

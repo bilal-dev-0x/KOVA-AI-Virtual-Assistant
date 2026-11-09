@@ -51,7 +51,7 @@
 - It is shrunk to at most 1280 px wide and saved as JPEG **in memory**. A normal screenshot is never written to disk.
 - `Provider.look(image, question)` is a new method beside `search()`:
   - **Gemini:** the picture and the question go in one request (`Part.from_bytes`), so one look costs one request of the daily quota.
-  - **Relay:** the picture is written to `logs/relay/screen.jpg` for Claude Code to read, then deleted when the answer comes.
+  - **Relay:** the picture is written to `logs/relay/screen.jpg` for the relay session to read, then deleted when the answer comes.
   - **No brain:** "Looking at the screen needs Gemini."
 - Phrases: "what's this error", "what's on my screen", "summarise this page", "read this for me", "explain this code".
 - Max prints `📸 Looking at <window title>` first, so you always know what was sent.
@@ -211,10 +211,10 @@ Downloads folder".
   comtypes on Python 3.14 works; `CUIAutomation8` with 1–2 s timeouts; a CacheRequest for reading.
 - [x] 5. Multi-step desktop tasks with checks before acting (`Result.halt`, dialogs in front).
 - [ ] Stretch: not done (see above)
-- [x] Each step reviewed by a second Claude session; all its findings fixed and tested. 929 tests.
+- [x] Each step reviewed by a second review session; all its findings fixed and tested. 929 tests.
   Read-only checks on this PC only: nothing moved, opened, clicked, typed, deleted or sent.
 - [x] Live test, text and voice (6 Nov, 11:08–13:57) → fixes:
-  - UI typing went into the terminal behind Max's (Claude Code's): terminals are now never typed, clicked or keyed in
+  - UI typing went into the terminal behind Max's (the terminal's): terminals are now never typed, clicked or keyed in
   - "organise d drive" went to the brain, which sorted Documents: other folders are refused locally
   - `D:\` never matched (`[\/]` was only a slash); "open my X folder now"; folders saved as "X in Y folder in d drive"
   - Spoken names: "pic dot png", "pitbull png", near spellings ("vichora" → Visora), letters spelled out

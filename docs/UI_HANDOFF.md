@@ -31,4 +31,4 @@ dialog, stat rings, Memory and Settings. **Not** in scope: floating pill, person
 
 ## Done means
 Steps 1-6 work in `python main.py --ui`, text and voice still work, all tests pass, and a short report says
-what was built, how to run it, and test numbers. Stop there; Claude reviews and live-tests.
+what was built, how to run it, and test numbers. Stop there; the reviewer live-tests.
