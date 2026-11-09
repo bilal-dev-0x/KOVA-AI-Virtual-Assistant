@@ -13,7 +13,7 @@
 | `app_windows()`, window titles, bring to front, close one window or tab | Minimise, maximise, restore, snap, arrange two apps side by side |
 | `search_files` opens Windows search in Explorer; `open_folder` opens a folder | Find files and read the results, open, create, rename, organise Downloads, delete to the Recycle Bin |
 | One approval per plan, critical steps ask again, undo (10 deep) | File and window tools use them as they are |
-| Brain providers: Gemini (text) and relay | Providers can also **look** at one picture: Gemini with an image, relay with a file Claude reads |
+| Brain providers: Gemini (text) and relay | Providers can also **look** at one picture: Gemini with an image, relay with a file the relay session reads |
 | Pillow 12.3, comtypes 1.4 and pywin32 312 are installed | UI Automation through comtypes (no new big library) |
 
 ---
