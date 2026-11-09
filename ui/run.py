@@ -4,7 +4,7 @@ from modules.logger import get_logger
 from modules.result import Result
 from ui.bridge import Bridge
 from ui.controller import Controller
-from ui.hotkey import DEFAULT_HOTKEY, Hotkey
+from ui.hotkey import DEFAULT_HOTKEY, TYPE_HOTKEY, Hotkey
 from ui.tray import Tray
 
 log = get_logger()
@@ -38,6 +38,8 @@ def run_ui(agent, dashboard_factory=None, tray_factory=Tray, hotkey_factory=Hotk
         controller.voice_prompt = lambda kind, question: voice.prompt(kind, question, is_yes)
         controller.on_sleep = voice.went_to_sleep
     hotkey = hotkey_factory(voice.wake if voice else controller.push_to_talk)
+    # A second key puts the cursor in KOVA's message box from any app (Bilal, 9 Nov)
+    type_key = hotkey_factory(lambda: dashboard is not None and bridge.post(dashboard.focus_input))
     tray = None
     dashboard = None
     result = Result(True, "KOVA dashboard closed.", stop=True)
@@ -87,6 +89,11 @@ def run_ui(agent, dashboard_factory=None, tray_factory=Tray, hotkey_factory=Hotk
             dashboard.on_hide = lambda: quit_app()
 
         hotkey.start(agent.config.get("PTT_HOTKEY", DEFAULT_HOTKEY))
+        if hasattr(type_key, "label"):
+            type_key.label = "Type-now hotkey"
+        type_key.start(agent.config.get("TYPE_HOTKEY", TYPE_HOTKEY))
+        from modules import window_watch
+        window_watch.start(agent.config)
         alerts.on_alert = lambda message: show_notice(f"Heads up, {agent.title}. {message}")
         reminders.on_fire = lambda message: show_notice(f"Reminder, {agent.title}: {message}")
         if agent.config.get("ALERTS_ON"):
@@ -100,6 +107,9 @@ def run_ui(agent, dashboard_factory=None, tray_factory=Tray, hotkey_factory=Hotk
             voice.stop()
         controller.stop()
         hotkey.stop()
+        type_key.stop()
+        from modules import window_watch
+        window_watch.stop()
         if tray is not None:
             tray.stop()
         alerts.stop()

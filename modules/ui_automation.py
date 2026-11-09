@@ -1,4 +1,5 @@
 import re
+import threading
 import time
 from dataclasses import dataclass
 
@@ -191,7 +192,16 @@ def click(name, window="", confirm=None):
     if isinstance(target, Result):
         return target
     hwnd, app, title = target
-    control = _one(read_controls(hwnd), name, app, editable=False)
+    control = _from_seen(hwnd, title, name, app)
+    if control is None:
+        controls = read_controls(hwnd)
+        control = _one(controls, name, app, editable=False)
+        if isinstance(control, Result) and not _matches(controls, name):
+            # Web pages keep their buttons deep in the tree, past what a quick read reaches
+            # (9 Nov: "click Run speed test" in Chrome found nothing): ask Windows by name
+            deep = _find_named(hwnd, name)
+            if deep:
+                control = _one(deep, name, app, editable=False)
     if isinstance(control, Result):
         return control
     word = risky(control.name)
@@ -267,13 +277,14 @@ def press_keys(keys, window=""):
 
 # ---------- UI Automation through comtypes (replaced in tests) ----------
 
-_UIA = {}
+_UIA = {}   # per thread: COM objects belong to the thread that made them
 
 
 def _automation():
     """IUIAutomation, its type library and a cache request. comtypes builds the wrapper once
     and keeps it in its cache; timeouts keep a hung app from blocking Max."""
-    if not _UIA:
+    mine = _UIA.get(threading.get_ident())
+    if mine is None:
         import comtypes.client
         comtypes.client.GetModule("UIAutomationCore.dll")
         from comtypes.gen import UIAutomationClient as UIA
@@ -290,8 +301,8 @@ def _automation():
         for prop in (UIA.UIA_NamePropertyId, UIA.UIA_ControlTypePropertyId, UIA.UIA_IsOffscreenPropertyId,
                      UIA.UIA_IsEnabledPropertyId, UIA.UIA_IsPasswordPropertyId):
             cache.AddProperty(prop)
-        _UIA.update(uia=uia, lib=UIA, cache=cache)
-    return _UIA["uia"], _UIA["lib"]
+        mine = _UIA[threading.get_ident()] = dict(uia=uia, lib=UIA, cache=cache)
+    return mine["uia"], mine["lib"]
 
 
 def _is_terminal(hwnd):
@@ -314,10 +325,51 @@ def _is_hung(hwnd):
     return bool(ctypes.windll.user32.IsHungAppWindow(windows._h(hwnd)))
 
 
+def _from_seen(hwnd, title, name, app):
+    """The control, found fast from the names read while the window came to the front
+    (modules/window_watch.py), or None to read the window now."""
+    from modules import window_watch
+    seen = window_watch.controls_for(hwnd, title)
+    if not seen:
+        return None
+    pick = _one(seen, name, app, editable=False)
+    if isinstance(pick, Result):
+        return None
+    found = [c for c in _find_named(hwnd, pick.name, exact=True) if c.kind == pick.kind]
+    return found[0] if len(found) == 1 else None
+
+
+def _find_named(hwnd, name, exact=False):
+    """Controls whose name contains name (or is exactly it), anywhere in the window. Windows does
+    the search itself, so it reaches deep into web pages within READ_SECONDS."""
+    words = (name or "").strip()
+    if not words:
+        return []
+    uia, UIA = _automation()
+    flags = 1 if exact else 3   # PropertyConditionFlags: IgnoreCase (1), MatchSubstring (2)
+    try:
+        condition = uia.CreatePropertyConditionEx(UIA.UIA_NamePropertyId, words, flags)
+        elements = uia.ElementFromHandle(hwnd).FindAllBuildCache(UIA.TreeScope_Descendants, condition,
+                                                                 _UIA[threading.get_ident()]["cache"])
+    except Exception as e:
+        log.debug("Search by name failed: %s", e)
+        return []
+    found = []
+    for i in range(min(elements.Length if elements else 0, 50)):
+        element = elements.GetElement(i)
+        try:
+            kind = KINDS.get(element.CachedControlType)
+            if kind and not element.CachedIsOffscreen and element.CachedIsEnabled:
+                found.append(Control(element.CachedName or "", kind, element, bool(element.CachedIsPassword)))
+        except Exception:
+            continue
+    return found
+
+
 def _read_tree(hwnd, deadline, max_depth):
     """Breadth first, so the top of the window (menus, toolbar) comes first; stops at the deadline."""
     uia, _ = _automation()
-    cache, walker = _UIA["cache"], uia.ControlViewWalker
+    cache, walker = _UIA[threading.get_ident()]["cache"], uia.ControlViewWalker
     found, queue = [], [(uia.ElementFromHandle(hwnd), 0)]
     while queue and time.time() < deadline and len(found) < MAX_CONTROLS:
         element, depth = queue.pop(0)

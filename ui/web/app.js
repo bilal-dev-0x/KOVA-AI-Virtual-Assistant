@@ -16,6 +16,7 @@ window.kova = (function () {
     stats: applyStats,
     memory: applyMemoryRows,
     "screen-result": applyScreenResult,
+    "focus-input": applyFocusInput,
   };
 
   function receive(event) {
@@ -365,6 +366,20 @@ window.kova = (function () {
       actions.appendChild(ok);
     }
     overlay.hidden = false;
+    dialog.openedAt = Date.now();
+    if (event.kind === "confirm" && document.activeElement) {
+      document.activeElement.blur();   // typing in the message box must not land in the sheet
+    }
+  }
+
+  function applyFocusInput() {
+    // The type-now hotkey: the conversation, with the cursor ready in the box
+    showPage("assistant");
+    const input = document.getElementById("ask-input");
+    if (input) {
+      input.focus();
+      input.select();
+    }
   }
 
   function respond(token, value) {
@@ -1158,6 +1173,14 @@ window.kova = (function () {
     document.addEventListener("keydown", (keyEvent) => {
       if (keyEvent.key === "Escape" && dialog.token !== null) {
         respond(dialog.token, dialog.kind === "confirm" ? false : null);   // closing is a No
+      }
+      // Enter on an approval is Yes, so no mouse is needed (Bilal, 9 Nov). A question box
+      // handles its own Enter, with what was typed.
+      // Not in the first half second: an Enter meant for the message box must not approve
+      if (keyEvent.key === "Enter" && dialog.token !== null && dialog.kind === "confirm"
+          && Date.now() - (dialog.openedAt || 0) > 500) {
+        keyEvent.preventDefault();
+        respond(dialog.token, true);
       }
     });
     const mic = document.getElementById("ask-mic");

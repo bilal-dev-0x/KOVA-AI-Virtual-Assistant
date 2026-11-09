@@ -9,6 +9,7 @@ from modules.logger import get_logger
 
 log = get_logger()
 DEFAULT_HOTKEY = "Ctrl+Alt+M"
+TYPE_HOTKEY = "Ctrl+Alt+K"   # from anywhere: KOVA in front, the cursor in the message box
 
 # What pynput calls the keys, by the names people type in a settings box
 SPECIALS = {
@@ -52,8 +53,9 @@ def parse(spec):
 class Hotkey:
     """The push-to-talk hotkey, live only while the dashboard runs."""
 
-    def __init__(self, on_press):
+    def __init__(self, on_press, label="Push-to-talk hotkey"):
         self.on_press = on_press
+        self.label = label
         self.spec = None
         self._listener = None
 
@@ -87,7 +89,7 @@ class Hotkey:
         if old is not None:
             old.stop()
         self.spec = spec
-        log.info("Push-to-talk hotkey: %s", spec)
+        log.info("%s: %s", self.label, spec)
         return True
 
     def stop(self):

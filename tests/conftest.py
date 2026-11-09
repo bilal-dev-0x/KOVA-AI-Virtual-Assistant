@@ -48,6 +48,8 @@ def no_real_windows(monkeypatch):
 
     def no_real_ui(*args, **kwargs):
         raise AssertionError("tests never read, click or type in real windows")
+    monkeypatch.setattr(ui_automation, "_from_seen", lambda *a: None)
+    monkeypatch.setattr(ui_automation, "_find_named", lambda *a, **k: [])   # nothing found deeper
     for name in ("_read_tree", "_invoke", "_set_empty_value", "_replace_value", "_focus", "_still_focused",
                  "_type_keys", "_press", "_is_hung", "_window_class", "_is_terminal"):
         monkeypatch.setattr(ui_automation, name, no_real_ui)
@@ -174,3 +176,10 @@ def no_real_startup_folder(monkeypatch, tmp_path):
     """No test reads or writes the real Startup folder."""
     from modules import startup
     monkeypatch.setattr(startup, "startup_dir", lambda: str(tmp_path / "no-startup"))
+
+
+@pytest.fixture(autouse=True)
+def no_window_to_front(monkeypatch):
+    """Tests never pull a real window (KOVA's own included) to the front or tap Alt."""
+    from ui import web_app
+    monkeypatch.setattr(web_app.WebDashboard, "_to_front", lambda self: None)

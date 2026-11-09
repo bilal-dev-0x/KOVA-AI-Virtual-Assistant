@@ -546,9 +546,20 @@ def _active_popup(hwnd):
     GW_ENABLEDPOPUP = 6
     handle = _h(hwnd)
     for popup in (user32.GetWindow(handle, GW_ENABLEDPOPUP), user32.GetLastActivePopup(handle)):
-        if popup and popup != hwnd and user32.IsWindowVisible(_h(popup)):
+        if popup and popup != hwnd and user32.IsWindowVisible(_h(popup)) and not _is_tiny(popup):
             return popup
     return None
+
+
+def _is_tiny(hwnd):
+    """A tooltip, tab hover card or info bar, not a dialog (9 Nov: Edge's 153x25 hover card was
+    taken for the window in front, so "click Run speed test" looked in it and found nothing)."""
+    import ctypes
+    from ctypes import wintypes
+    rect = wintypes.RECT()
+    if not ctypes.windll.user32.GetWindowRect(_h(hwnd), ctypes.byref(rect)):
+        return False
+    return rect.right - rect.left < 200 or rect.bottom - rect.top < 80
 
 
 def _press_win_d():

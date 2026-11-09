@@ -425,8 +425,9 @@ class WebDashboard:
 
         url = "file:///" + WEB_DIR.replace("\\", "/") + "/index.html"
         create_window = create_window or self._create_webview_window
+        self._title = f"KOVA — {agent.name}"
         self._window = create_window(
-            title=f"KOVA — {agent.name}", url=url, js_api=self.api,
+            title=self._title, url=url, js_api=self.api,
             width=1180, height=760, min_size=(900, 600), resizable=True,
             background_color="#0b0d12", text_select=True)
         self._bind_window_events()
@@ -585,6 +586,37 @@ class WebDashboard:
         self._set_visible(True)
         self.pill.hide()
 
+    def focus_window(self):
+        try:
+            self._window.show()
+            self._window.restore()
+        except Exception:
+            pass
+        self._set_visible(True)
+        self._to_front()
+
+    def focus_input(self):
+        """The type-now hotkey: KOVA in front, on the Assistant screen, cursor in the box."""
+        try:
+            self._window.show()
+            self._window.restore()
+        except Exception:
+            pass
+        self._set_visible(True)
+        self._to_front()
+        self._push({"t": "focus-input"})
+
+    def _to_front(self):
+        """Windows lets a program take the front only right after a key press: Max taps Alt first."""
+        try:
+            import ctypes
+            from modules import system_control
+            hwnd = ctypes.windll.user32.FindWindowW(None, self._title)
+            if hwnd:
+                system_control._bring_to_front(hwnd, wait_seconds=0.5)
+        except Exception as e:
+            log.debug("Bringing KOVA to the front failed: %s", e)
+
     def withdraw(self):
         """To the tray: the window goes, Max keeps working."""
         self._window.hide()
@@ -680,6 +712,9 @@ class WebDashboard:
         self._status_override = "approval"
         self._shown_state = None
         self._mirror_state()
+        if self.agent.config.get("APPROVAL_TO_FRONT", True):
+            # The question comes to you, wherever you are: Enter says yes, Esc says no
+            self.focus_window()
         with self._lock:
             self._prompt_token += 1
             token = self._prompt_token

@@ -1109,8 +1109,10 @@ class Agent:
     def click_in(self, said):
         """'mobile devices option in setting window' -> click 'mobile devices' in the Settings window
         (7 Nov log: the whole phrase was taken as the button's name)."""
-        m = re.match(r"^(?P<name>.+?)( option| button| link| item| tab)? (in|on) (the |my )?(?P<window>.+?) window$",
-                     said or "")
+        m = re.match(r"^(?P<name>.+?)( option| button| link| item| tab)? (in|on) (the |my )?(?P<window>.+?) windows?$",
+                     said or "") or \
+            re.match(r"^(?P<name>.+?)( option| button| link| item| tab)? (in|on) (the |my )?"
+                     r"(?P<window>chrome|edge|brave|firefox|opera)$", said or "")
         if m:
             return self._tool("ui_click", name=self._said(m["name"]), window=m["window"])
         return self._tool("ui_click", name=self._said(said))
