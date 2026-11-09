@@ -68,7 +68,7 @@ def test_falls_asleep_after_timeout(monkeypatch):
     assert handled == ["goodbye"]
 
 
-def test_confirmation_asks_again_when_nothing_heard(monkeypatch):
+def test_gentle_close_does_not_start_voice_approval(monkeypatch):
     from modules import system_control
     from modules.result import Result
     monkeypatch.setattr(system_control, "check_app", lambda name, must_be_running=False: (name, None))
@@ -76,8 +76,21 @@ def test_confirmation_asks_again_when_nothing_heard(monkeypatch):
     monkeypatch.setattr(system_control, "close_app", lambda name: closed.append(name) or Result(True, "Closed"))
 
     _, spoken = run(monkeypatch, ["max close notepad", None, "yes", "goodbye"])
-    assert "Sorry, I didn't hear you. Say yes do it, or no." in spoken
+    assert "Sorry, I didn't hear you. Say yes do it, or no." not in spoken
     assert closed == ["notepad"]
+
+
+def test_confirmation_asks_again_when_nothing_heard(monkeypatch):
+    from modules import system_control
+    from modules.result import Result
+    monkeypatch.setattr(system_control, "check_force", lambda name: (name, None))
+    forced = []
+    monkeypatch.setattr(system_control, "force_close",
+                        lambda name: forced.append(name) or Result(True, "Force closed"))
+
+    _, spoken = run(monkeypatch, ["max force close notepad", None, "yes", "goodbye"])
+    assert "Sorry, I didn't hear you. Say yes do it, or no." in spoken
+    assert forced == ["notepad"]
 
 
 def test_single_word_noise_not_sent_to_gemini(monkeypatch):

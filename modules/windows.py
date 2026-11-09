@@ -1,6 +1,7 @@
 import os
 import re
 import time
+from difflib import SequenceMatcher
 
 from modules import system_control
 from modules.logger import get_logger
@@ -57,6 +58,37 @@ def app_name(process):
     return lower.removesuffix(".exe")
 
 
+def _near_windows(name):
+    """Find a unique open window matching a speech-misheard app name; never searches installed apps."""
+    query = re.sub(r"\s+window$", "", (name or "").lower().strip())
+    query = re.sub(r"[^a-z0-9 ]", " ", query)
+    query = " ".join(query.split())
+    if len(query) < 3:
+        return []
+
+    def consonants(value):
+        return re.sub(r"[aeiou\W_]+", "", value.lower())
+
+    matches = []
+    for hwnd, process, title in visible_windows():
+        if _ours(hwnd):
+            continue
+        app = app_name(process)
+        names = (app, process.removesuffix(".exe"), title)
+        score = 0.0
+        phonetic = False
+        for candidate in names:
+            candidate = re.sub(r"[^a-z0-9 ]", " ", candidate.lower())
+            candidate = " ".join(candidate.split())
+            score = max(score, SequenceMatcher(None, query, candidate, autojunk=False).ratio())
+            left, right = consonants(query), consonants(candidate)
+            if left and right and left[0] == right[0] and SequenceMatcher(None, left, right).ratio() >= 0.55:
+                phonetic = True
+        if score >= 0.60 or phonetic:
+            matches.append((hwnd, app, title, max(score, 0.60 if phonetic else score)))
+    return matches
+
+
 OWN_NAMES = {"your", "yours", "yourself", "you", "kova", "max", "mira", "dashboard", "kova dashboard",
              "your own", "the kova"}
 
@@ -76,6 +108,13 @@ def find(name, title=""):
             return None, None, Result(False, "My window isn't open. Start me with --ui to get it.")
         return found[0][0], "KOVA", found[0][1]
     key, entry = system_control._resolve_app(name)
+    if key and entry:
+        said_name = re.sub(r"\s+window$", "", (name or "").lower().strip())
+        exact_names = {key.lower(), *(alias.lower() for alias in entry.get("aliases", []))}
+        if said_name not in exact_names:
+            # Approximate speech matches must be resolved against open windows only,
+            # not an installed-app list, so two open matches can be reported safely.
+            key, entry = None, None
     if key == "file explorer":
         # 7 Nov log: Explorer windows are titled by their folder, so "file explorer" never matched
         app = key
@@ -102,6 +141,20 @@ def find(name, title=""):
         wanted = system_control.title_words(title)
         found = [(hwnd, text) for hwnd, text in found if system_control.title_has(text, wanted)]
     if not found:
+        near = _near_windows(name)
+        if len(near) == 1:
+            hwnd, app, text, _ = near[0]
+            return hwnd, app, text
+        if len(near) > 1:
+            labels = []
+            for _, app, title, _ in near[:5]:
+                label = f"{app.capitalize()} — {system_control.short_title(title)}"
+                if label not in labels:
+                    labels.append(label)
+            options = tuple(labels)
+            return None, None, Result(False, f"I heard {name}. Which window did you mean: "
+                                               + "; ".join(labels) + "?",
+                                      halt=True, choices=options)
         shown = f" showing {title}" if title else ""
         return None, None, Result(False, f"I can't see a {app} window{shown}.")
     hwnd, text = found[0]
@@ -194,6 +247,12 @@ def move(name, position, title=""):
         moved = _show(hwnd, {"maximise": SW_MAXIMIZE, "minimise": SW_MINIMIZE, "restore": SW_RESTORE}[position])
         message = {"maximise": f"Maximised {app}.", "minimise": f"Minimised {app}.",
                    "restore": f"Restored {app}."}[position]
+    entry = system_control.load_apps().get("apps", {}).get(app.lower(), {})
+    aliases = {app.lower(), *(alias.lower() for alias in entry.get("aliases", []))}
+    heard = re.sub(r"\s+window$", "", (name or "").lower().strip())
+    if heard and heard not in aliases:
+        message = re.sub(rf"\b{re.escape(app)}\b", app.capitalize(), message, count=1, flags=re.I)
+        message = message.rstrip(".") + f" (I heard {heard})."
     if not moved:
         return _admin_answer(hwnd, app, f"Windows didn't let me move {app}.")
     log.info("Window %s (%s) -> %s", app, text, position)

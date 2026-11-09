@@ -14,3 +14,5 @@ class Result:
     # Set by actions that can be reversed: undo() -> Result, undo_text says what it will do
     undo: Callable = None
     undo_text: str = ""
+    choices: tuple = ()    # concrete options when a tool asks the user to disambiguate
+    resume: dict = None    # optional tool call that can continue when the user picks an option

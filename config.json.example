@@ -23,6 +23,7 @@
     "mx"
   ],
   "AWAKE_TIMEOUT": 60,
+  "APPROVAL_SECONDS": 45,
   "SPEECH_LANGUAGES": ["en-US", "en-IN"],
   "SERVER_BRAIN": true,
   "SERVER_URLS": ["http://192.168.50.2:11434", "http://100.109.31.1:11434"],

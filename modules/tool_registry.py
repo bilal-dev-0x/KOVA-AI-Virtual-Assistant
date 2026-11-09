@@ -33,6 +33,7 @@ class Tool:
     level: str = SAFE
     confirm_text: str = ""   # how the action is described when asking, e.g. "close {name}", or a function of args
     check: Callable = None   # check(**args) -> Result explaining why it can't run, or None
+    intent_words: tuple = () # words the user's own request must contain before this tool may run
 
     def schema(self):
         """JSON schema of the arguments, as AI function calling expects it."""
@@ -74,6 +75,10 @@ class Tool:
                 if p["required"]:
                     return None, f"missing argument: {name}"
                 continue
+            # 9 Nov log: a blank optional string means the tool default (project: "" is
+            # "the last or KOVA project"), not an argument error.
+            if not p["required"] and isinstance(args[name], str) and not args[name].strip():
+                continue
             value, error = _cast(args[name], p["type"])
             if error:
                 return None, f"{name} {error}"
@@ -102,7 +107,7 @@ def _cast(value, kind):
     return number, None
 
 
-def tool(description, params=None, level=SAFE, confirm_text="", check=None, name=None):
+def tool(description, params=None, level=SAFE, confirm_text="", check=None, name=None, intent_words=()):
     """Register a function as a tool.
 
     Argument types come from the type hints (str, int, float, bool); arguments
@@ -123,7 +128,8 @@ def tool(description, params=None, level=SAFE, confirm_text="", check=None, name
                 "required": p.default is inspect.Parameter.empty,
                 "enum": enum,
             }
-        t = Tool(name or func.__name__, description, func, spec, level, confirm_text, check)
+        t = Tool(name or func.__name__, description, func, spec, level, confirm_text, check,
+                 tuple(intent_words or ()))
         REGISTRY[t.name] = t
         func.tool = t
         return func

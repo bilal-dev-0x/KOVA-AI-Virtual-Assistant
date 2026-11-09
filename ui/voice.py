@@ -102,6 +102,12 @@ class VoiceLoop:
             return None
         command = self.finish_cut_off(command, self.listen)
 
+        ignore_noise = getattr(self.agent, "ignore_awake_noise", None)
+        if self.awake and ignore_noise and ignore_noise(command):
+            log.info("Ignored: %s", self.agent.normalize(command))
+            self.last_active = self.clock()
+            return None
+
         done = threading.Event()
         if not self.controller.submit(command, source="voice", done=done):
             return None
@@ -118,7 +124,8 @@ class VoiceLoop:
     def prompt(self, kind, question, is_yes):
         """Ask out loud and listen for the answer, like voice mode does."""
         self.speak(question)
-        answer = self.listen(wait_seconds=6, max_seconds=10)
+        timeout = self.agent.config.get("APPROVAL_SECONDS", 45)
+        answer = self.listen(wait_seconds=timeout, max_seconds=timeout)
         if kind == "ask":
             return answer
         if answer is None:
@@ -126,4 +133,7 @@ class VoiceLoop:
             self.speak("Sorry, I didn't hear you. Say yes do it, or no.")
             answer = self.listen(wait_seconds=6, max_seconds=10)
         log.info("Confirmation %r -> %r", question, answer)
+        if answer is None:
+            self.speak("I didn't hear a yes, so I left it.")
+            return False
         return is_yes(answer, question)

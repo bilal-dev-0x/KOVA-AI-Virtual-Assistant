@@ -27,6 +27,7 @@ class Command:
     help: str = ""
     confirm_text: str = ""  # question asked before a controlled/critical command, may use {arg}
     ask_text: str = ""      # asked when the target is missing ("close" -> "Close what?")
+    decline_text: str = ""  # said when the user answers "no" to that question, blank: "Okay, cancelled."
     prepare: Callable = None  # prepare(arg) -> (clean_arg, None) or (None, Result) when it can't run
 
     def __post_init__(self):
@@ -438,10 +439,12 @@ class Agent:
         self.raw_text = ""      # what was said, before normalize(): memory keeps its capitals and paths
         self.last_fact = None   # the memory "forget that" means
         self.last_answer = None  # what "say again" repeats
+        self.pending_question = None  # a short spoken reply belongs to this question for 60 seconds
         self.closing_title = None  # (app, window title) when "close lofi music" named a window, not an app
         self.closing_window = None  # (said, app, title) for a window of an app apps.json doesn't know
         self.last_played = None    # what "close the song" means
         self.trace = print if self.config.get("AGENT_TRACE", True) else (lambda line: None)
+        tools._context["trace"] = lambda line: self.trace(line)
         self.commands = self._build_commands()
 
     # ---------- command table (first match wins, so specific before general) ----------
@@ -491,6 +494,18 @@ class Agent:
                     self.forget_all, help="forget everything"),
             Command("forget", r"^(forget|delete the memory|remove the memory)( about(?= )| that(?= ))?( (?P<arg>.+))?$",
                     self.forget, help="forget <something> / forget that", ask_text="Forget what?"),
+            Command("list scheduled tasks", r"^(list|show)( me)?( all)?( my| the)? scheduled tasks$"
+                                             r"|^(what|which) scheduled tasks do i have$",
+                    lambda arg: self._tool("list_scheduled_tasks"), help="list scheduled tasks"),
+            Command("cancel scheduled task", r"^(cancel|delete|remove) (the )?scheduled task (?P<arg>\d+)$",
+                    lambda arg: self._tool("cancel_scheduled_task", task_id=int(arg)),
+                    help="cancel scheduled task 1"),
+            Command("schedule daily open", r"^(every day|daily|each day) at (?P<arg>.+)$",
+                    self.schedule_daily_open, level=CONTROLLED,
+                    confirm_text="schedule this daily app action: {arg}",
+                    help="every day at 9 AM open my mail"),
+            Command("schedule battery alert", r"^(when|if) (my )?battery (is )?(below|under|less than) (?P<arg>\d{1,3})( percent)?( tell me| notify me| warn me)?$",
+                    self.schedule_battery_alert, help="when battery is below 20 percent tell me"),
             Command("list reminders", r"^((list|show)( me)?( all)?( my| the)? (reminders|timers|alarms)"
                                       r"|(what|which) (reminders|timers|alarms) do i have"
                                       r"|(tell me )?(what|which) are( all)?( my| the)? (reminders|timers|alarms)( i have| set)?"
@@ -647,7 +662,7 @@ class Agent:
                     confirm_text="Force close {arg}? Anything unsaved in it will be lost.", ask_text="Force close what?",
                     prepare=lambda arg: system_control.check_force(arg)),
             Command("close", r"^(close|quit|kill|exit)( (?P<arg>.+))?$",
-                    lambda arg: tool("close_app", name=arg), level=CONTROLLED, help="close <app>",
+                    lambda arg: tool("close_app", _approval="not needed", name=arg), level=SAFE, help="close <app>",
                     confirm_text="Close {arg}?", ask_text="Close what?", prepare=self._prepare_close),
             Command("restart", r"^(restart|reopen|relaunch)( (?P<arg>.+))?$",
                     lambda arg: tool("restart_app", name=arg), level=CONTROLLED, help="restart <app>",
@@ -684,6 +699,11 @@ class Agent:
             Command("list routines", r"^(what|which) routines (do i have|are there|have i got)$"
                                      r"|^(list|show|tell me)( me)?( all)?( my| the)? routines$|^(my )?routines$",
                     lambda arg: tool("list_routines"), help="what routines do I have"),
+            Command("save suggested routine", r"^save (this|that|the suggested) routine as (?P<arg>.+)$",
+                    lambda arg: tool("save_suggested_routine", name=arg), level=CONTROLLED,
+                    confirm_text="Save the suggested routine as {arg}?",
+                    # 9 Nov log: "cancelled" is confusing when Bilal wanted the routine kept
+                    decline_text="Okay, I didn't save the routine."),
             Command("activity apps", rf"^(which|what) apps (did i|have i|i did|i have) (open|opened|use|used)( the)? most( (?P<arg>{_PERIOD}))?$"
                                      rf"|^(what|which) (apps|programs) did i (open|use)( (?P<arg2>{_PERIOD}))?$",
                     lambda arg: tool("activity_summary", period=arg or "this week", focus="apps"),
@@ -781,6 +801,10 @@ class Agent:
                     ask_text="What should I search for?"),
             Command("gpu", r"\b(gpu|graphics card|video card)\b",
                     lambda arg: tool("gpu_usage"), help="gpu usage"),
+            Command("internet speed", r"^(?:(whats|what is|check|test|measure|get|show)( my| the)? )?"
+                                       r"(internet|wifi|wi fi|net)( connection)? speed( test)?$"
+                                       r"|^net ki speed$|^speed test$",
+                    lambda arg: tool("internet_speed"), help="check my internet speed"),
             # Last, so "what is my cpu usage" and "whats my battery" stay system commands
             Command("recall", r"^(?P<arg4>((what|where|which|who|when|how)( kind of| sort of)?( \w+)? |\w+ )?"
                               r"(do|did|was|am|have) i (keep|put|like|love|prefer|enjoy|listen to|born|live|work|study"
@@ -793,7 +817,7 @@ class Agent:
                     self.news, help="news"),
         ]
 
-    def _tool(self, tool_name, /, **args):
+    def _tool(self, tool_name, /, _approval=None, **args):
         """Run a tool for a local command. Approval was already asked for in handle().
 
         Goes through runner.prepare() so a local command obeys permissions.json
@@ -803,7 +827,7 @@ class Agent:
         if problem:
             log.info("Local tool %s not run: %s", tool_name, problem.message)
             return problem
-        approval = "confirmed" if tool.level != SAFE else "not needed"
+        approval = _approval or ("confirmed" if tool.level != SAFE else "not needed")
         return self.runner.run(tool, clean, approval, source="local")
 
     # ---------- routing ----------
@@ -839,10 +863,132 @@ class Agent:
             if self.last_answer is None:
                 return Result(True, "I haven't said anything yet.")
             return self.last_answer
+        from modules import actions, routine_habits
+        try:
+            action_offset = os.path.getsize(actions.ACTIONS_LOG)
+        except OSError:
+            action_offset = 0
         result = self._handle(raw_text)
+        if result is not None and result.success:
+            entries = routine_habits.new_entries(actions.ACTIONS_LOG, action_offset)
+            if routine_habits.observe(entries):
+                result.message = ((result.message or "").rstrip() + "\nI noticed you repeated these same safe "
+                                  "steps on three different days. Say 'save this routine as <name>' if you'd "
+                                  "like me to save them.")
+        if result is not None and (result.halt or (result.message or "").rstrip().endswith("?")):
+            self._remember_question(raw_text, result)
         if result is not None and result.message:
             self.last_answer = Result(result.success, result.message)
         return result
+
+    def _remember_question(self, raw_text, result):
+        self.pending_question = {
+            "question": result.message,
+            "original": raw_text,
+            "at": time.time(),
+            "choices": tuple(result.choices or ()),
+            "resume": result.resume,
+        }
+
+    @staticmethod
+    def _question_choice(text, choices):
+        """Match a spoken choice without guessing between multiple live controls."""
+        clean = lambda value: re.sub(r"\s+", " ", re.sub(r"[^a-z0-9 ]", " ", (value or "").lower())).strip()
+        answer = clean(text)
+        ordinal = {"first": 0, "1st": 0, "one": 0, "second": 1, "2nd": 1,
+                   "third": 2, "3rd": 2, "fourth": 3, "4th": 3, "fifth": 4, "5th": 4}
+        for word, index in ordinal.items():
+            if answer in {word, f"the {word} one", f"{word} one", f"the {word}"} and index < len(choices):
+                return choices[index]
+        padded = f" {answer} "
+        found = [choice for choice in choices if f" {clean(choice)} " in padded]
+        if len(found) == 1:
+            return found[0]
+        # A user commonly shortens "Search icon" to "search field". Don't mistake
+        # an address-and-search bar for that field when another search control exists.
+        if answer in {"search field", "search box"}:
+            found = [choice for choice in choices if "search" in clean(choice) and "address" not in clean(choice)]
+            if len(found) == 1:
+                return found[0]
+        words = [word for word in answer.split() if word not in {"the", "one", "field", "box", "bar", "icon"}]
+        found = [choice for choice in choices if words and all(word in clean(choice).split() for word in words)]
+        return found[0] if len(found) == 1 else None
+
+    def _continue_question(self, raw_text, text):
+        pending = self.pending_question
+        if not pending:
+            return None
+        if time.time() - pending["at"] > 60:
+            self.pending_question = None
+            return None
+
+        resume = pending.get("resume") or {}
+        choices = pending.get("choices", ())
+        choice = self._question_choice(text, choices)
+        if choice is None and not choices and resume.get("tool") in {"ui_type", "ui_click"}:
+            # A halted UI tool with no candidate list can still use the user's short clarification.
+            if len(text.split()) <= 5 and not self._starts_new_command(text):
+                choice = text
+
+        if choice is None:
+            if self._starts_new_command(text):
+                self.pending_question = None
+                return None
+            if len(text.split()) > 7:
+                self.pending_question = None
+                return None
+            self.pending_question = None
+            context = (f"(You asked: {pending['question']} The original request was: {pending['original']} "
+                       f"The user answered: {raw_text}. Continue that original request.)")
+            return self._ask_agent(context)
+
+        self.pending_question = None
+        if resume.get("tool") in {"ui_type", "ui_click"}:
+            args = dict(resume.get("args") or {})
+            if resume["tool"] == "ui_type":
+                args["field"] = choice
+                payload = self._clarified_text(raw_text, choice)
+                if payload:
+                    args["text"] = payload
+            else:
+                args["name"] = choice
+            return self._tool(resume["tool"], **args)
+
+        if resume.get("local_text"):
+            original = resume["local_text"]
+            old_arg = resume.get("arg") or ""
+            updated = (re.sub(rf"\b{re.escape(old_arg)}\b", choice, original, count=1, flags=re.I)
+                       if old_arg else f"{original} {choice}")
+            return self.handle(updated)
+
+        context = (f"(You asked: {pending['question']} The original request was: {pending['original']} "
+                   f"The user chose: {choice}. Continue the original request.)")
+        return self._ask_agent(context)
+
+    @staticmethod
+    def _clarified_text(raw_text, choice):
+        match = re.match(r"^(?:search|type)\s+(.+?)\s+(?:in|into)\s+(?:the\s+)?(.+?)"
+                         r"(?:\s+(?:field|box|bar))?$", raw_text.strip(), re.I)
+        if not match:
+            return ""
+        target = re.sub(r"[^a-z0-9 ]", " ", match.group(2).lower())
+        selected = re.sub(r"[^a-z0-9 ]", " ", choice.lower())
+        return match.group(1).strip() if selected.strip() in target else ""
+
+    @staticmethod
+    def _starts_new_command(text):
+        return bool(re.match(r"^(open|launch|start|close|force|type|click|press|create|make|delete|remove|rename|"
+                             r"minimi[sz]e|maximi[sz]e|restore|switch|play|remind|set|find|locate|organize|"
+                             r"organise|undo|exit|quit|restart)\b", text or ""))
+
+    def ignore_awake_noise(self, raw_text):
+        """One-word mic fragments are ignored; recognised one-word commands still run."""
+        text = fix_misheard(self.normalize(raw_text or ""))
+        if text in {"there is", "theres"}:
+            return True
+        if len(text.split()) != 1:
+            return False
+        return not any(command.regex.fullmatch(text) for command in self.commands)
 
     def _handle(self, raw_text):
         self.raw_text = raw_text
@@ -854,6 +1000,10 @@ class Agent:
 
         if not text:
             return Result(True, f"Yes {self.title}?")
+
+        continued = self._continue_question(raw_text, text)
+        if continued is not None:
+            return continued
 
         # "coding mode": your own routine phrases come before every built-in command
         routine = routines.find(routines.cached()[0], text)
@@ -933,6 +1083,8 @@ class Agent:
             arg, problem = command.prepare(arg)
             if problem:
                 log.info("Command %s not run: %s", command.name, problem.message)
+                if problem.halt:
+                    return problem
                 if self.provider and _probably_not_an_app(target, problem):
                     # Google hears "ok Claude, check the logs" as "ok close check the logs"
                     return self._ask_agent(raw_text)
@@ -962,10 +1114,13 @@ class Agent:
             question = command.confirm_text.format(arg=arg) if command.confirm_text else f"Should I {text}?"
             if not self.confirm(question):
                 log.info("Cancelled %s %s", command.name, arg or "")
-                return Result(False, "Okay, cancelled.")
+                return Result(False, command.decline_text or "Okay, cancelled.")
 
         try:
-            result = self._tool("close_app", name=arg, window=window) if window else command.handler(arg)
+            result = self._tool("close_app", _approval="not needed", name=arg, window=window) \
+                if window else command.handler(arg)
+            if result.halt and result.resume is None:
+                result.resume = {"local_text": text, "arg": arg}
         except Exception as e:
             log.exception("Command %s failed", command.name)
             return Result(False, f"Sorry {self.title}, something went wrong with {command.name}.", detail=str(e))
@@ -1033,7 +1188,8 @@ class Agent:
             self.recent_local = []
 
         print("Thinking.....")
-        return agent_loop.run(self.session, message, self.runner, self.confirm, trace=self.trace)
+        return agent_loop.run(self.session, message, self.runner, self.confirm, trace=self.trace,
+                              user_text=raw_text)
 
     def _answer(self, answer):
         """An answer to a question, cleaned: 'the calculator' -> 'calculator'.
@@ -1063,7 +1219,28 @@ class Agent:
         self.closing_window = None
         if system_control._resolve_app(arg)[0] == "terminal":
             return "terminal", None  # closed window by window in handle(), never Max's own
+        resolved, entry = system_control._resolve_app(arg)
+        fuzzy_problem = None
+        if resolved and entry:
+            said = re.sub(r"\s+window$", "", (arg or "").lower().strip())
+            exact = {resolved.lower(), *(alias.lower() for alias in entry.get("aliases", []))}
+            if said not in exact:
+                # A fuzzy app-name match is safe only when it identifies one open window.
+                hwnd, app, title = windows.find(arg)
+                if hwnd is not None:
+                    browser = BROWSER_KEYS.get(windows.process_of(hwnd))
+                    if browser:
+                        self.closing_title = (browser, title)
+                        return browser, None
+                    self.closing_window = (arg, app, title)
+                    return arg, None
+                if title and title.choices:
+                    return None, title
+                fuzzy_problem = title
         key, problem = system_control.check_app(arg, must_be_running=True)
+        if fuzzy_problem and problem is None:
+            # The fuzzy app exists but no unique visible window matched; don't close the whole app.
+            return None, fuzzy_problem
         # Unknown, a website, or a Start menu app Max can't see running ("close youtube desktop":
         # a web app in a chrome.exe window titled "YouTube"): look for its window instead
         if problem and (problem.message.startswith("I don't know") or " is a website" in problem.message
@@ -1091,6 +1268,43 @@ class Agent:
     def open_any(self, name):
         """An app or website first; when there is none by that name, a file or folder called that
         (live test: "open max live check" went to the AI for a file Max had just made)."""
+        # Exact app names keep their normal meaning; an unknown app name can name a tab
+        # in the window already in front (9 Nov log: Epic's Downloads tab).
+        resolved = None
+        if name:
+            said_name = name.strip().lower()
+            app_data = system_control.load_apps()
+            exact_apps = set(app_data.get("websites", {}))
+            for key, entry in app_data.get("apps", {}).items():
+                exact_apps.add(key.lower())
+                exact_apps.update(alias.lower() for alias in entry.get("aliases", []))
+            if said_name in exact_apps:
+                resolved = system_control.resolve(name)
+            else:
+                # A literal Start menu name is exact too; don't let fuzzy app guessing
+                # outrank a control already visible in the foreground.
+                start_menu = system_control.start_menu_apps()
+                if said_name in start_menu:
+                    resolved = system_control.resolve(name)
+        if resolved is None and name:
+            front = windows.target_window()
+            if front:
+                hwnd, app, title = front
+                from modules import window_watch, ui_automation
+                query = self.normalize(name).removeprefix("the ").strip()
+                aliases = {"download": "downloads", "downloads": "downloads"}
+                query = aliases.get(query, query)
+                controls = window_watch.controls_for(hwnd, title)
+                matches = [c for c in controls or [] if self.normalize(c.name) == query]
+                if controls is None:
+                    matches = ui_automation._find_named(hwnd, query, exact=True)
+                if len(matches) == 1:
+                    return self._tool("ui_click", name=matches[0].name)
+                if len(matches) > 1:
+                    labels = "; ".join(
+                        f"{getattr(c, 'kind', '') or 'match'} {c.name} ({index})"
+                        for index, c in enumerate(matches, 1))
+                    return Result(False, f"I found more than one {query}: {labels}. Which one?", halt=True)
         opened = self._tool("open_app", name=name)
         if opened.success or not name or not re.search(r"don't know an app|can't find", opened.message.lower()):
             return opened
@@ -1613,6 +1827,24 @@ class Agent:
         if self.provider:
             return self._ask_agent(text)
         return Result(False, "Tell me when, like: remind me in 10 minutes to stretch.")
+
+    def schedule_daily_open(self, phrase):
+        match = re.fullmatch(r"(?P<time>\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+(?:open|launch)\s+(?P<app>.+)",
+                             (phrase or "").strip())
+        if not match:
+            return Result(False, "Say: every day at 9 AM, open Gmail.")
+        app = match["app"].strip()
+        app = re.sub(r"^(my|the) ", "", app)
+        if app in {"mail", "email", "my email"}:
+            app = "gmail"
+        return self._tool("schedule_daily_open", at_time=match["time"].strip(), app=app)
+
+    def schedule_battery_alert(self, threshold):
+        try:
+            value = int(threshold)
+        except (TypeError, ValueError):
+            return Result(False, "Tell me a battery level, like 20 percent.")
+        return self._tool("schedule_battery_alert", threshold=value)
 
     def date(self, arg):
         return Result(True, f"Today is {datetime.now().strftime('%A, %d %B %Y')}")

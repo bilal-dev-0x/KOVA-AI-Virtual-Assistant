@@ -115,7 +115,7 @@ def test_fallback_uses_gemini_answer():
     assert agent.handle("explain black holes").message == "Black holes are dense."
 
 
-def test_controlled_command_asks_and_can_be_cancelled(monkeypatch):
+def test_gentle_close_command_does_not_ask(monkeypatch):
     monkeypatch.setattr(desktop_agent.system_control, "check_app",
                         lambda name, must_be_running=False: (name, None))
     closed = []
@@ -125,13 +125,27 @@ def test_controlled_command_asks_and_can_be_cancelled(monkeypatch):
     questions = []
     no_agent = Agent(confirm=lambda q: questions.append(q) or False)
     result = no_agent.handle("close notepad")
-    assert questions == ["Close notepad?"]
-    assert closed == []
+    assert questions == []
+    assert result.success
+    assert closed == ["notepad"]
+
+
+def test_controlled_command_asks_and_can_be_cancelled(monkeypatch):
+    monkeypatch.setattr(desktop_agent.system_control, "check_force", lambda name: (name, None))
+    forced = []
+    monkeypatch.setattr(desktop_agent.system_control, "force_close",
+                        lambda name: forced.append(name) or Result(True, "Force closed"))
+
+    questions = []
+    no_agent = Agent(confirm=lambda q: questions.append(q) or False)
+    result = no_agent.handle("force close notepad")
+    assert questions == ["Force close notepad? Anything unsaved in it will be lost."]
+    assert forced == []
     assert result.message == "Okay, cancelled."
 
     yes_agent = Agent(confirm=lambda q: True)
-    assert yes_agent.handle("close notepad").success
-    assert closed == ["notepad"]
+    assert yes_agent.handle("force close notepad").success
+    assert forced == ["notepad"]
 
 
 def test_safe_command_does_not_ask(monkeypatch):

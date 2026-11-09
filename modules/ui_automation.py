@@ -171,7 +171,8 @@ def _one(controls, name, app, editable):
             found = file_name
         if len(found) > 1:
             names = ", ".join(c.name or "no name" for c in found[:5])
-            return Result(False, f"{app} has {len(found)} text fields: {names}. Say which one.", halt=True)
+            return Result(False, f"{app} has {len(found)} text fields: {names}. Say which one.",
+                          halt=True, choices=tuple(c.name for c in found[:5] if c.name))
     if not found:
         what = "field" if editable else "control"
         if not spoken_name(name):
@@ -181,7 +182,8 @@ def _one(controls, name, app, editable):
         return Result(False, f"I can't find a {what} called {name} in {app}.", halt=True)
     if len(found) > 1:
         names = "; ".join(f"{c.kind} {c.name}" for c in found[:5])
-        return Result(False, f"There are {len(found)} called {name} in {app}: {names}. Say which one.", halt=True)
+        return Result(False, f"There are {len(found)} called {name} in {app}: {names}. Say which one.",
+                      halt=True, choices=tuple(c.name for c in found[:5] if c.name))
     return found[0]
 
 
@@ -490,20 +492,48 @@ def _input_type():
 
     class INPUT(ctypes.Structure):
         _fields_ = [("type", wintypes.DWORD), ("u", UNION)]
-    return INPUT, KEYBDINPUT
+    return INPUT, KEYBDINPUT, MOUSEINPUT
 
 
 def _send(events):
     """events: [(vk, scan, flags)]. True only if Windows took every one: UIPI (an admin window),
     a locked screen or the secure desktop take fewer."""
     import ctypes
-    INPUT, KEYBDINPUT = _input_type()
+    INPUT, KEYBDINPUT, _ = _input_type()
     INPUT_KEYBOARD = 1
     inputs = (INPUT * len(events))()
     for i, (vk, scan, flags) in enumerate(events):
         inputs[i].type = INPUT_KEYBOARD
         inputs[i].u.ki = KEYBDINPUT(wVk=vk, wScan=scan, dwFlags=flags, time=0, dwExtraInfo=0)
     return ctypes.windll.user32.SendInput(len(events), inputs, ctypes.sizeof(INPUT)) == len(events)
+
+
+def click_at(hwnd, title, x, y):
+    """Click one screen point only while the exact window is still in front."""
+    import ctypes
+
+    if not system_control._bring_to_front(hwnd):
+        return False
+    if _same_window(hwnd, title):
+        return False
+    left, top, width, height = windows._get_rect(hwnd)
+    if not (left <= x < left + width and top <= y < top + height):
+        return False
+    INPUT, _, MOUSEINPUT = _input_type()
+    user32 = ctypes.windll.user32
+    origin_x, origin_y = user32.GetSystemMetrics(76), user32.GetSystemMetrics(77)
+    screen_width, screen_height = user32.GetSystemMetrics(78), user32.GetSystemMetrics(79)
+    if screen_width <= 1 or screen_height <= 1:
+        return False
+    dx = round((x - origin_x) * 65535 / (screen_width - 1))
+    dy = round((y - origin_y) * 65535 / (screen_height - 1))
+    # Absolute virtual-desktop coordinates also work when the target monitor is left of the main one.
+    flags = 0x0001 | 0x8000 | 0x4000  # MOVE | ABSOLUTE | VIRTUALDESK
+    events = (INPUT * 3)()
+    for index, event_flags in enumerate((flags, 0x0002, 0x0004)):
+        events[index].type = 0  # INPUT_MOUSE
+        events[index].u.mi = MOUSEINPUT(dx, dy, 0, event_flags, 0, 0)
+    return user32.SendInput(len(events), events, ctypes.sizeof(INPUT)) == len(events)
 
 
 def text_events(text):

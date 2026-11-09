@@ -540,6 +540,15 @@ class WebDashboard:
             self.pet.hide()
 
     def refresh_boot(self):
+        self._title = f"KOVA — {self.agent.name}"
+        setter = getattr(self._window, "set_title", None)
+        if setter:
+            setter(self._title)
+        else:
+            try:
+                self._window.title = self._title
+            except (AttributeError, RuntimeError):
+                pass
         self._push(self._my_boot_event())
         self.pill.push(self._my_boot_event())
         self.pet.push(self._my_boot_event())

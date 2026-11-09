@@ -6,7 +6,7 @@ import sys
 import time
 
 from desktop_agent import Agent
-from modules import alerts, reminders
+from modules import alerts, reminders, scheduled_tasks
 from modules.logger import get_logger
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -268,6 +268,8 @@ def main():
         while True:
             # "restart yourself" comes back here with config.json read again
             agent = Agent(load_config())
+            if hasattr(agent, "runner"):
+                scheduled_tasks.start(agent.runner)
             mode = "dashboard" if args.ui else "text" if args.text else "voice"
             log.info("KOVA started in %s mode", mode)
             if agent.config.get("ALERTS_ON") and not args.ui:
@@ -280,6 +282,7 @@ def main():
                     result = run_text(agent) if args.text else run_voice(agent)
             finally:
                 alerts.stop()
+                scheduled_tasks.stop()
             if not (result and result.restart):
                 break
             log.info("KOVA restarting")

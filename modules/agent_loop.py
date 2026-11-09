@@ -4,6 +4,7 @@ from brain.base import BrainError
 from modules.actions import result_for_ai
 from modules.logger import get_logger
 from modules.result import Result
+from modules import tool_registry
 
 # The agent loop: the AI plans, asks for tools, reads their results and
 # continues until it can answer. KOVA decides what actually runs.
@@ -90,6 +91,8 @@ def system_prompt(config):
         "Call several tools at once when the steps don't depend on each other. "
         "Approval for risky actions is handled for you, so don't ask for permission yourself. "
         "You cannot run shell commands or install software. "
+        "If project tests fail and the user wants a code fix, propose one small unified diff with apply_project_patch; "
+        "the tool previews that exact diff and asks before changing one existing project file, and undo restores its backup. "
         "Speech recognition can mishear words: if a request looks garbled, ask the user to repeat it "
         "instead of guessing an action. "
         "A message may start with a note about commands the user ran without you; use it to "
@@ -120,7 +123,28 @@ def _args_text(args):
     return ", ".join(f"{k}={v!r}" for k, v in (args or {}).items())
 
 
-def run_calls(calls, runner, confirm, trace, done=None, approved_tools=None, succeeded=None):
+def _intent_problem(tool, args):
+    if tool.name == "organise_folder":
+        folder = (args or {}).get("folder", "downloads")
+        return Result(False, f"Did you want me to organise {folder.title()}? Say it in those words and I will.",
+                      halt=True)
+    return Result(False, f"I won't {tool.name.replace('_', ' ')} unless you ask for it directly.", halt=True)
+
+
+def _has_user_intent(tool, user_text):
+    text = re.sub(r"[^a-z0-9]+", " ", (user_text or "").lower()).strip()
+    for word in tool.intent_words:
+        phrase = re.sub(r"[^a-z0-9]+", " ", word.lower()).strip()
+        for match in re.finditer(rf"(?<!\w){re.escape(phrase)}(?!\w)", text):
+            before = text[:match.start()].rstrip()
+            if re.search(r"\b(?:dont|do not|never|no|without)(?:\s+\w+){0,3}\s*$", before):
+                continue
+            return True
+    return False
+
+
+def run_calls(calls, runner, confirm, trace, done=None, approved_tools=None, succeeded=None,
+              user_text=None):
     """Run one batch of tool calls. Returns [(call, result_dict)] and the Results. done collects
     what ran successfully. After a result that halts (the window changed), the rest is not run.
     approved_tools: tools the user already said yes to in this plan; they aren't asked about again."""
@@ -128,7 +152,13 @@ def run_calls(calls, runner, confirm, trace, done=None, approved_tools=None, suc
     approved_tools = set() if approved_tools is None else approved_tools
     succeeded = set() if succeeded is None else succeeded  # tool names that worked in this request
     permissions = runner.permissions
-    prepared = [(call, *runner.prepare(call.name, call.args)) for call in calls]
+    prepared = []
+    for call in calls:
+        registered = tool_registry.get(call.name)
+        if registered and registered.intent_words and not _has_user_intent(registered, user_text):
+            prepared.append((call, registered, dict(call.args or {}), _intent_problem(registered, call.args)))
+        else:
+            prepared.append((call, *runner.prepare(call.name, call.args)))
 
     # Whole-plan approval: every controlled step in this batch is approved with one question, and
     # a kind of step said yes to once isn't asked about again in the same plan.
@@ -170,7 +200,7 @@ def run_calls(calls, runner, confirm, trace, done=None, approved_tools=None, suc
     return answers, results
 
 
-def run(session, text, runner, confirm, trace=print, max_steps=MAX_STEPS):
+def run(session, text, runner, confirm, trace=print, max_steps=MAX_STEPS, user_text=None):
     """Handle one request with the AI. Returns the final spoken Result."""
     details, done, approved_tools, succeeded = [], [], set(), set()
     try:
@@ -185,7 +215,8 @@ def run(session, text, runner, confirm, trace=print, max_steps=MAX_STEPS):
             steps += 1
             if reply.text:
                 trace(f"  💭 {reply.text}")
-            answers, results = run_calls(reply.calls, runner, confirm, trace, done, approved_tools, succeeded)
+            answers, results = run_calls(reply.calls, runner, confirm, trace, done, approved_tools, succeeded,
+                                         text if user_text is None else user_text)
             details += [r.detail for r in results if r.detail]
             halted = next((r for r in results if r.halt), None)
             if halted:
@@ -193,12 +224,20 @@ def run(session, text, runner, confirm, trace=print, max_steps=MAX_STEPS):
                 session.reset()
                 log.info("Plan halted: %s", halted.message)
                 ran = f" I already did: {', '.join(done)}." if done else " Nothing else ran."
-                return Result(False, halted.message.rstrip(".") + "." + ran, detail="\n".join(details))
+                stopped = next(((call, result) for call, result in zip(reply.calls, results) if result is halted),
+                               (None, halted))[0]
+                resume = ({"tool": stopped.name, "args": dict(stopped.args or {})}
+                          if stopped is not None else None)
+                return Result(False, halted.message.rstrip(".") + "." + ran, detail="\n".join(details),
+                              halt=True, choices=halted.choices, resume=resume)
             reply = session.send_results(answers)
     except BrainError as e:
         session.reset()
         log.warning("Agent could not answer: %s", e)
-        return Result(False, str(e))
+        message = str(e)
+        if not message.lower().startswith(("i couldn't reach ", "i could not reach ")):
+            message = "I couldn't reach the AI right now."
+        return Result(False, message)
     except KeyboardInterrupt:
         session.reset()
         log.info("Plan cancelled with Ctrl+C: %s", text)

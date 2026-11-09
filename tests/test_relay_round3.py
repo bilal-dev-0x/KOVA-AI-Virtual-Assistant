@@ -224,7 +224,7 @@ def test_one_window_asks_the_normal_question(monkeypatch, two_chrome_windows):
     agent = Agent(confirm=lambda q: questions.append(q) or True)
     agent.ask = lambda q: pytest.fail("one window: nothing to choose")
     agent.handle("close chrome")
-    assert questions == ["Close chrome?"]
+    assert questions == []
     assert two_chrome_windows == [("chrome", "")]
 
 

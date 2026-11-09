@@ -350,7 +350,7 @@ def test_the_agents_delete_asks_with_the_full_paths(recycled):
     b = make(folder("desktop") / "b.txt")
     provider = FakeProvider([Reply(calls=[ToolCall("delete_items", {"targets": "a.txt; b.txt"})])])
     agent, asked = max_agent(True, provider=provider)
-    agent.handle("clean up a and b from my desktop")
+    agent.handle("delete a and b from my desktop")
     assert asked.questions == [f"This needs extra care. Should I really move these 2 to the Recycle Bin: {a}; {b}?"]
     assert recycled == [str(a), str(b)]
 
