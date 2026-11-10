@@ -92,6 +92,69 @@ def _near_windows(name):
 OWN_NAMES = {"your", "yours", "yourself", "you", "kova", "max", "mira", "dashboard", "kova dashboard",
              "your own", "the kova"}
 
+# The dashboard window's title is "KOVA — <persona>" (web_app); the pet companion
+# is "KOVA companion". Self-referential window words must only ever mean the
+# dashboard: 10 Nov log — with the dashboard hidden the pet was the only own
+# window still visible, and "maximise your window" stretched the frameless,
+# round companion black into the top-left corner and it stuck there.
+DASHBOARD_PREFIX = "KOVA — "
+
+# run_ui sets this: bring a hidden dashboard back through pywebview (position is
+# "maximise" or anything else meaning just show+front). It must stay None in
+# voice/text mode, where there is no dashboard to drive.
+on_own_window = None
+
+
+def _is_dashboard_title(title):
+    """True for KOVA's main window ('KOVA — Max'), never for a companion."""
+    return (title or "").startswith(DASHBOARD_PREFIX)
+
+
+def _own_windows_with_titles():
+    """Every top-level window of this very process, visible or hidden, as
+    [(hwnd, title)] — the dashboard, the pet, the pill, even cloaked ones."""
+    if os.name != "nt":
+        return []
+    import ctypes
+    from ctypes import wintypes
+    user32 = ctypes.windll.user32
+    callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    found = []
+
+    def visit(hwnd, _):
+        if _ours(hwnd):
+            length = user32.GetWindowTextLengthW(hwnd)
+            if length:
+                # The same three-argument call visible_windows() makes: a real
+                # buffer plus the count. 10 Nov log: passing the count where the
+                # buffer belongs left every own window with an empty title, so
+                # "maximise yourself" said the window wasn't open while the UI
+                # was running.
+                title = ctypes.create_unicode_buffer(length + 1)
+                user32.GetWindowTextW(hwnd, title, length + 1)
+                found.append((hwnd, title.value))
+            else:
+                found.append((hwnd, ""))
+        return True
+
+    user32.EnumWindows(callback_type(visit), 0)
+    return found
+
+
+def _dashboard_hwnd():
+    """KOVA's dashboard window, visible or hidden: (hwnd, title) or (None, None)."""
+    for hwnd, title in _own_windows_with_titles():
+        if _is_dashboard_title(title):
+            return hwnd, title
+    return None, None
+
+
+def _is_visible(hwnd):
+    if os.name != "nt":
+        return True
+    import ctypes
+    return bool(ctypes.windll.user32.IsWindowVisible(_h(hwnd)))
+
 
 def find(name, title=""):
     """The window name means: (hwnd, app, title), or (None, None, Result) explaining why not.
@@ -102,8 +165,12 @@ def find(name, title=""):
     """
     said = re.sub(r"\s+window$", "", (name or "").lower().strip())
     if said in OWN_NAMES:
-        # 7 Nov log: "minimise your window" failed; it means Max's own dashboard
-        found = [(hwnd, text) for hwnd, _, text in visible_windows() if _ours(hwnd)]
+        # 7 Nov log: "minimise your window" failed; it means Max's own dashboard.
+        # 10 Nov log: the dashboard only — companions are never meant, and a
+        # hidden dashboard isn't a visible window, so move() routes that case
+        # through the UI layer instead of this lookup.
+        found = [(hwnd, text) for hwnd, _, text in visible_windows()
+                 if _ours(hwnd) and _is_dashboard_title(text)]
         if not found:
             return None, None, Result(False, "My window isn't open. Start me with --ui to get it.")
         return found[0][0], "KOVA", found[0][1]
@@ -228,9 +295,39 @@ def _snap(hwnd, side, work=None):
 
 
 def move(name, position, title=""):
+    said = re.sub(r"\s+window$", "", (name or "").lower().strip())
+    if said in OWN_NAMES:
+        return _move_own(position)
     hwnd, app, text = find(name, title)
     if hwnd is None:
         return text  # the Result explaining why
+    if _ours(hwnd) and not _is_dashboard_title(text):
+        # "maximise the companion window": the round frameless pet must never be
+        # stretched — 10 Nov log — it turned black and stuck in the corner
+        return Result(False, "My companion stays as he is; I only move other windows.")
+    return _move_hwnd(hwnd, app, text, position, said)
+
+
+def _move_own(position):
+    """A self-referential move ("maximise your window"): the dashboard and only
+    the dashboard. When it is hidden, Win32 calls would fight pywebview's own
+    state, so the UI layer is asked to bring it back; the pet companion is
+    never a target."""
+    dash, dash_title = _dashboard_hwnd()
+    if dash is None:
+        return Result(False, "My window isn't open. Start me with --ui to get it.")
+    if not _is_visible(dash):
+        if position == "minimise":
+            return Result(True, "My window is already out of sight.")
+        if on_own_window is None:
+            return Result(False, "My window is hidden and I can't bring it back from here.")
+        return on_own_window(position)
+    return _move_hwnd(dash, "KOVA", dash_title, position)
+
+
+def _move_hwnd(hwnd, app, text, position, said=""):
+    """The shared move for one found window: front, snap or maximise/minimise/
+    restore, with undo. `said` is the words the user used, for the reply."""
     if position == "front":
         if system_control._bring_to_front(hwnd):
             return Result(True, f"{app.capitalize()} is in front.")
@@ -249,10 +346,9 @@ def move(name, position, title=""):
                    "restore": f"Restored {app}."}[position]
     entry = system_control.load_apps().get("apps", {}).get(app.lower(), {})
     aliases = {app.lower(), *(alias.lower() for alias in entry.get("aliases", []))}
-    heard = re.sub(r"\s+window$", "", (name or "").lower().strip())
-    if heard and heard not in aliases:
+    if said and said not in aliases:
         message = re.sub(rf"\b{re.escape(app)}\b", app.capitalize(), message, count=1, flags=re.I)
-        message = message.rstrip(".") + f" (I heard {heard})."
+        message = message.rstrip(".") + f" (I heard {said})."
     if not moved:
         return _admin_answer(hwnd, app, f"Windows didn't let me move {app}.")
     log.info("Window %s (%s) -> %s", app, text, position)

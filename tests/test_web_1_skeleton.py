@@ -50,6 +50,8 @@ class FakeWebViewWindow:
         self.scripts = []
         self.shown = 0
         self.hidden = 0
+        self.restored = 0
+        self.maximized = 0
         self.destroyed = False
         self.events = FakeEvents()
 
@@ -66,6 +68,12 @@ class FakeWebViewWindow:
 
     def hide(self):
         self.hidden += 1
+
+    def restore(self):
+        self.restored += 1
+
+    def maximize(self):
+        self.maximized += 1
 
     def destroy(self):
         self.destroyed = True

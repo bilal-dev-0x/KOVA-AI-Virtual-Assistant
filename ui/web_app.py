@@ -12,7 +12,7 @@ from ui import messages as messages_tab
 from ui import settings as settings_tab
 from ui import stats as stats_tab
 from ui import data as data_tab
-from ui.pill import Pet, Pill
+from ui.pill import Pet
 
 # The new dashboard window: PyWebView (Edge WebView2) showing ui/web/. Only the
 # window layer of the classic CustomTkinter app is replaced here — the same
@@ -311,6 +311,7 @@ class JsApi:
                 "VOICE": agent.config.get("VOICE", settings_tab.DEFAULTS["VOICE"]),
                 "ALERTS_ON": bool(agent.config.get("ALERTS_ON", False)),
                 "PET_ON": bool(agent.config.get("PET_ON", False)),
+                "CLOSE_ON_X": bool(agent.config.get("CLOSE_ON_X", False)),
                 "WAKE_WORDS": ", ".join(wake_words_from(agent.config)),
                 "PTT_HOTKEY": agent.config.get("PTT_HOTKEY", settings_tab.DEFAULTS["PTT_HOTKEY"]),
                 "START_WITH_WINDOWS": startup.is_enabled(),
@@ -413,6 +414,7 @@ class WebDashboard:
         self._pet_started = False
         self._pending_user = None
         self._bound = {}                      # <Map> / <Unmap> hooks for run_ui
+        self._shutdown_started = False        # one quit once CLOSE_ON_X fires
         self._prompt_token = 0                # one dialog at a time, known by token
         self._open_token = None
         self._prompt_answer = None
@@ -431,9 +433,9 @@ class WebDashboard:
             width=1180, height=760, min_size=(900, 600), resizable=True,
             background_color="#0b0d12", text_select=True)
         self._bind_window_events()
-        # The floating companion, made only the first time the dashboard goes to the tray
-        self.pill = Pill(on_open=lambda: self.show(), on_talk=lambda: self.controller.push_to_talk(),
-                         create_window=pill_window)
+        # The only desktop companion is the Mini Reaper persona (10 Nov: the
+        # floating Open/Talk pill is gone — the pet's double-click and the tray
+        # open the dashboard, the hotkey and mic button carry the voice)
         self.pet = Pet(on_open=lambda: self.show(), on_talk=lambda: self.controller.push_to_talk(),
                        create_window=pill_window)
 
@@ -460,15 +462,23 @@ class WebDashboard:
         events.shown += self._window_shown
         events.minimized += self._window_minimized
         events.restored += self._window_restored
+        events.closing += self._window_closing   # X on the title bar (10 Nov)
 
     # ---------- one pump thread ----------
 
     def _pump_loop(self):
         """The drain the classic window did with a Tk timer: run posted
         callbacks on the page and keep the status in step. While the window is
-        hidden only posted work runs; the cheap state check waits for it."""
+        hidden only posted work runs; the cheap state check waits for it.
+        10 Nov log: a single raising step used to kill this whole thread, and
+        the quit that X posts rides on it — a broken step now skips itself
+        instead, so a queued shutdown is always delivered."""
         while self._alive and not self._pump_stop.is_set():
-            self._tick()
+            try:
+                self._tick()
+            except Exception:
+                log.exception("UI pump step failed")
+                time.sleep(0.1)   # keep the loop paced if a step keeps failing
 
     def _tick(self):
         """One pump step, exact enough to steer from tests. Buffered events go
@@ -477,8 +487,8 @@ class WebDashboard:
         ran = self.controller.bridge.next_call(timeout=0.1)
         if ran:
             return   # what that work pushed goes out on the next tick
-        if self._visible or self.pet.window is not None or self.pill.window is not None:
-            # The desktop Reaper and the pill follow Max while the dashboard is hidden too
+        if self._visible or self.pet.window is not None:
+            # The desktop Reaper follows Max while the dashboard is hidden too
             self._mirror_state()
 
     def _flush_pending(self):
@@ -516,7 +526,6 @@ class WebDashboard:
         if state != self._shown_state:
             self._shown_state = state
             self._push(state_event(state))
-            self.pill.push(state_event(state))
             self.pet.push(state_event(state))
 
     # ---------- events from the window ----------
@@ -550,7 +559,6 @@ class WebDashboard:
             except (AttributeError, RuntimeError):
                 pass
         self._push(self._my_boot_event())
-        self.pill.push(self._my_boot_event())
         self.pet.push(self._my_boot_event())
         self._shown_state = None
 
@@ -565,6 +573,41 @@ class WebDashboard:
 
     def _window_restored(self):
         self._set_visible(True)
+
+    def _window_closing(self):
+        """X on the title bar. This handler runs on pywebview's GUI thread, so
+        it must only decide and hand the work to the pump thread — the same
+        road the tray's hide and Quit buttons take. Doing window work here
+        freezes the whole UI: 10 Nov log — hide-on-X ran pill.show() right on
+        this thread, pywebview skips native window creation when called from
+        the main thread while the loop runs, and the wrapped show() then spent
+        up to 20 seconds waiting for an event only the GUI thread could set:
+        "Program Not Responding".
+        Default is hide-to-tray (on_hide, exactly the tray-hide path, so the
+        pet stays up and the dashboard can be reopened). CLOSE_ON_X is
+        a whole-app quit (on_exit): destroy() on the pump closes dashboard
+        and pet, pywebview's instances reach zero and its loop ends, so
+        run_ui's cleanup (tray icon included) always follows.
+        Returning False cancels the native close in both modes; the teardown
+        stays in destroy()'s hands — pywebview raises closing a second time
+        when destroy() closes this very window, which must be let through."""
+        if not self._alive:
+            return None
+        if self.agent.config.get("CLOSE_ON_X", False):
+            if self._shutdown_started:
+                return None           # the quit is already queued: close the window
+            self._shutdown_started = True
+            self._hand_off(self.on_exit or self.destroy)
+        else:
+            self._hand_off(self.on_hide)
+        return False
+
+    def _hand_off(self, work):
+        """Give `work` to the pump thread. If the bridge is already closed
+        (teardown under way) a one-shot thread does it instead — the GUI thread
+        never runs or waits for the work itself."""
+        if not self.controller.bridge.post(work):
+            threading.Thread(target=work, daemon=True, name="kova-ui-close").start()
 
     # ---------- visibility ----------
 
@@ -593,7 +636,6 @@ class WebDashboard:
     def show(self):
         self._window.show()
         self._set_visible(True)
-        self.pill.hide()
 
     def focus_window(self):
         try:
@@ -601,6 +643,19 @@ class WebDashboard:
             self._window.restore()
         except Exception:
             pass
+        self._set_visible(True)
+        self._to_front()
+
+    def show_maximised(self):
+        """'Maximise your window' with the dashboard hidden: back on screen,
+        in front, filling it. Only ever called on the pump thread — pywebview's
+        show/restore/maximize marshal to the GUI loop themselves."""
+        try:
+            self._window.show()
+            self._window.restore()
+            self._window.maximize()
+        except Exception as e:
+            log.debug("Dashboard maximise skipped: %s", e)
         self._set_visible(True)
         self._to_front()
 
@@ -627,10 +682,12 @@ class WebDashboard:
             log.debug("Bringing KOVA to the front failed: %s", e)
 
     def withdraw(self):
-        """To the tray: the window goes, Max keeps working."""
+        """To the tray: the window goes, Max keeps working, the pet stays as he
+        is (10 Nov: no pill opens beside him any more). Always called off the
+        GUI thread — X and the tray both route it through the pump, because
+        pywebview would wait on itself anywhere else."""
         self._window.hide()
         self._set_visible(False)
-        self.pill.show()
         self._shown_state = None   # re-showing puts the status up again
 
     def show_notice(self, message):
@@ -775,13 +832,14 @@ class WebDashboard:
 
     def destroy(self):
         """Max is quitting for good: closes the page and lets the pump go."""
+        if not self._alive:
+            return   # already down: pet and window are gone or going
         self._alive = False
         self._pump_stop.set()
         stats = getattr(self, "_stats", None)
         if stats is not None:
             stats.stop()
         self._ready = False   # no more sends into a dead window
-        self.pill.destroy()
         self.pet.destroy()
         try:
             self._window.destroy()

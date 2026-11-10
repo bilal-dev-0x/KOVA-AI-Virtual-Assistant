@@ -133,6 +133,42 @@ def test_run_ui_wires_one_agent_and_tears_down(monkeypatch):
     assert agent.min_ai_words == 3
 
 
+def test_run_ui_wires_the_own_window_hook_and_clears_it(monkeypatch):
+    """run.py owns windows.on_own_window for exactly as long as the dashboard
+    lives: the agent's 'maximise your window' with the dashboard hidden goes
+    through it, and voice/text mode afterwards must never see a dead window."""
+    from modules import voice_handler, windows
+
+    monkeypatch.setattr(voice_handler, "configure", lambda config: None)
+    seen = []
+
+    class HookDashboard(FakeDashboard):
+        def focus_window(self):
+            seen.append("front")
+
+        def show_maximised(self):
+            seen.append("maximise")
+
+        def mainloop(self):
+            assert windows.on_own_window is not None      # wired while the UI lives
+            answer = windows.on_own_window("maximise")    # the agent's tool path
+            assert answer.success and "back up" in answer.message
+            end = time.time() + 2
+            while not seen and time.time() < end:
+                self.controller.bridge.drain()
+                time.sleep(0.002)
+            self.controller.bridge.drain()
+            self.on_exit(Result(True, "restart", restart=True))
+
+    result = run_ui(FakeAgent(), dashboard_factory=HookDashboard, tray_factory=FakeTray,
+                    hotkey_factory=lambda callback: FakeHotkey(callback),
+                    listen=lambda: None, speak=lambda text: None)
+
+    assert result.restart
+    assert seen == ["maximise"]                           # the pump ran the window work
+    assert windows.on_own_window is None                  # cleared once the UI is gone
+
+
 def test_run_ui_returns_stop_result_when_the_dashboard_quits(monkeypatch):
     from modules import alerts, voice_handler
 

@@ -3,12 +3,13 @@ from modules.logger import get_logger
 # The Settings tab's logic, kept out of the widgets so it can be tested without
 # a window. Saving goes through tools.save_setting, so every other key in
 # config.json stays exactly as it is and nothing is ever printed: the file holds
-# API keys, and Day 6 only ever writes the four keys below.
+# API keys, and Day 6 only ever writes the keys in DEFAULTS below.
 
 log = get_logger()
 
 VOICES = ("male", "female")
-DEFAULTS = {"VOICE": "female", "ALERTS_ON": False, "PTT_HOTKEY": "Ctrl+Alt+M", "PET_ON": False}
+DEFAULTS = {"VOICE": "female", "ALERTS_ON": False, "PTT_HOTKEY": "Ctrl+Alt+M", "PET_ON": False,
+            "CLOSE_ON_X": False}
 
 
 def parse_wake_words(text):
@@ -53,6 +54,10 @@ def changes(current, form):
 
     if form.get("PET_ON") is not None and bool(form["PET_ON"]) != bool(current.get("PET_ON", False)):
         wanted["PET_ON"] = bool(form["PET_ON"])
+
+    if form.get("CLOSE_ON_X") is not None and \
+            bool(form["CLOSE_ON_X"]) != bool(current.get("CLOSE_ON_X", DEFAULTS["CLOSE_ON_X"])):
+        wanted["CLOSE_ON_X"] = bool(form["CLOSE_ON_X"])
 
     words = parse_wake_words(form.get("WAKE_WORDS"))
     if "WAKE_WORDS" not in wanted and words and words != _wake_words(current):

@@ -165,8 +165,9 @@ class FakeProvider(Provider):
 
 
 @pytest.fixture(autouse=True)
-def no_real_pill(monkeypatch):
-    """A test that sends the dashboard to the tray must never open a floating window."""
+def no_real_companion(monkeypatch):
+    """A test that sends the dashboard to the tray must never open a floating
+    companion window (the pet inherits Pill.show, so this covers both)."""
     import ui.pill
     monkeypatch.setattr(ui.pill.Pill, "show", lambda self: False)
 

@@ -3,12 +3,16 @@ import os
 
 from modules.logger import get_logger
 
-# The floating companion: a small always-on-top window that shows what Max is
-# doing while the dashboard is in the tray. It is created the first time the
-# dashboard goes away, never at startup, so a user who keeps the dashboard open
-# pays no memory for it. Windows 10 gives frameless windows square corners and
-# transparency is unreliable, so the pill is an opaque rectangle with a 1px line.
-# Any failure here only means no pill: the tray icon and the hotkey still work.
+# The companion windows: a small always-on-top window that shows what Max is
+# doing while the dashboard is in the tray. It is created the first time it is
+# needed, never at startup, so a user who keeps the dashboard open pays no
+# memory for it. Windows 10 gives frameless windows square corners and
+# transparency is unreliable, so the base window is an opaque rectangle with a
+# 1px line. Any failure here only means no companion: the tray icon and the
+# hotkey still work.
+# 10 Nov: the rectangular pill is no longer shown on the desktop — the Mini
+# Reaper persona is the only companion. The Pill class stays because Pet is
+# built on it (show/hide/push/destroy lifecycle and PillApi are shared).
 
 log = get_logger()
 

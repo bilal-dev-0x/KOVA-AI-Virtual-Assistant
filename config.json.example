@@ -33,5 +33,6 @@
   "GEMINI_TIMEOUT": 20,
   "VOICE": "female",
   "ALERTS_ON": false,
-  "PTT_HOTKEY": "Ctrl+Alt+M"
+  "PTT_HOTKEY": "Ctrl+Alt+M",
+  "CLOSE_ON_X": false
 }

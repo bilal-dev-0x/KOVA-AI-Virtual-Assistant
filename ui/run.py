@@ -17,7 +17,7 @@ def run_ui(agent, dashboard_factory=None, tray_factory=Tray, hotkey_factory=Hotk
     Factories are injectable so lifecycle wiring can be tested without opening
     a real window, installing a keyboard hook, or showing a tray icon.
     """
-    from modules import alerts, reminders, voice_handler
+    from modules import alerts, reminders, voice_handler, windows
 
     voice_handler.configure(agent.config)
     agent.min_ai_words = 3
@@ -56,6 +56,15 @@ def run_ui(agent, dashboard_factory=None, tray_factory=Tray, hotkey_factory=Hotk
         if dashboard is not None:
             dashboard.destroy()
 
+    def own_window_call(position):
+        """'maximise your window' and friends from the agent: only the UI layer
+        may bring a hidden dashboard back, so pywebview's state, the stats and
+        the tray's is_visible stay in step. 10 Nov log: Win32 calls on the
+        hidden dashboard were never the answer, and they are never aimed at the
+        pet companion either."""
+        bridge.post(dashboard.show_maximised if position == "maximise" else dashboard.focus_window)
+        return Result(True, "Bringing my window back up.")
+
     try:
         if dashboard_factory is None:
             from ui.web_app import WebDashboard
@@ -68,6 +77,7 @@ def run_ui(agent, dashboard_factory=None, tray_factory=Tray, hotkey_factory=Hotk
             on_hotkey=hotkey.start,
         )
         dashboard.on_exit = quit_app
+        windows.on_own_window = own_window_call
         controller.prompt = dashboard.prompt
         visible = {"value": True}
         dashboard.bind("<Map>", lambda event: visible.update(value=True), add="+")
@@ -115,6 +125,7 @@ def run_ui(agent, dashboard_factory=None, tray_factory=Tray, hotkey_factory=Hotk
         alerts.stop()
         alerts.on_alert = old_alert
         reminders.on_fire = old_reminder
+        windows.on_own_window = None   # voice/text mode must never hold a dead window ref
 
     log.info("KOVA dashboard stopped")
     return result

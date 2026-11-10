@@ -100,7 +100,7 @@ def test_the_fresh_list_follows_even_a_failed_delete(monkeypatch):
 
 # ---------- settings ----------
 
-def test_settings_api_reads_only_its_four_keys():
+def test_settings_api_reads_only_its_own_keys():
     dashboard, window, controller = make_loaded_dashboard()
     try:
         dashboard.agent.config = {
@@ -113,7 +113,7 @@ def test_settings_api_reads_only_its_four_keys():
         assert "decoy" not in str(form)
         assert form.pop("PERSONAS") == [{"id": "max", "name": "Max"}, {"id": "mira", "name": "Mira"}]
         assert form == {"PERSONA": "max", "VOICE": "female", "ALERTS_ON": True, "PET_ON": False,
-                        "WAKE_WORDS": "max, mac", "PTT_HOTKEY": "F9"}
+                        "CLOSE_ON_X": False, "WAKE_WORDS": "max, mac", "PTT_HOTKEY": "F9"}
         assert "GEMINI_API_KEY" not in form and "decoy" not in str(form)
     finally:
         dashboard.destroy()
@@ -126,7 +126,7 @@ def test_the_config_defaults_fill_the_form_when_keys_are_missing():
         form = dashboard.api.settings()
         form.pop("PERSONAS"), form.pop("START_WITH_WINDOWS"), form.pop("BRAIN")
         assert form == {"PERSONA": "max", "VOICE": "female", "ALERTS_ON": False, "PET_ON": False,
-                        "WAKE_WORDS": "max", "PTT_HOTKEY": "Ctrl+Alt+M"}
+                        "CLOSE_ON_X": False, "WAKE_WORDS": "max", "PTT_HOTKEY": "Ctrl+Alt+M"}
     finally:
         dashboard.destroy()
 

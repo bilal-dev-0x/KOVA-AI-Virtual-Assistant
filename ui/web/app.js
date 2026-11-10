@@ -506,6 +506,10 @@ window.kova = (function () {
     form.appendChild(switchField("Start with Windows", "a shortcut in your own Startup folder; off removes it",
       current.START_WITH_WINDOWS, "startup"));
 
+    form.appendChild(switchField("Close app on X",
+      "closing the dashboard exits KOVA instead of hiding it to the system tray",
+      current.CLOSE_ON_X, "close-on-x"));
+
     form.appendChild(textField("Wake words", "comma separated", current.WAKE_WORDS, "wake-words"));
     form.appendChild(textField("Listen-now key", "wakes Max without the wake word",
       current.PTT_HOTKEY, "hotkey"));
@@ -523,6 +527,7 @@ window.kova = (function () {
         ALERTS_ON: document.getElementById("set-alerts").checked,
         PET_ON: document.getElementById("set-pet").checked,
         START_WITH_WINDOWS: document.getElementById("set-startup").checked,
+        CLOSE_ON_X: document.getElementById("set-close-on-x").checked,
         WAKE_WORDS: document.getElementById("set-wake-words").value,
         PTT_HOTKEY: document.getElementById("set-hotkey").value,
       };
